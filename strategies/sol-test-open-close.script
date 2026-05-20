@@ -1,0 +1,3 @@
+BUY: close > 0
+SELL: barsHeld >= 1 || unrealizedPnlPct > 0.001 || unrealizedPnlPct < -0.001
+POSITION: 0.01

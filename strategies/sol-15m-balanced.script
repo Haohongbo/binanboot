@@ -1,0 +1,3 @@
+BUY: close > ma120 && ma20 > ma60 && maFast > maSlow && macd > macdSignal && rsi14 > 30 && rsi14 < 88 && bbPctB < 0.7 && momentum3 > -0.002 && momentum12 > -0.012 && closeLocation > 0 && volumeRatio > 1.15 && atrPct < 0.07
+SELL: unrealizedPnlPct > 0.012 || unrealizedPnlPct < -0.02 || drawdownSinceEntry > 0.04 || barsHeld > 48 || ((rsi14 > 74 || maFast < maSlow || macd < macdSignal) && unrealizedPnlPct > 0.002)
+POSITION: 0.65
