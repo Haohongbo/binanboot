@@ -16,10 +16,16 @@ import type {
   RiskRuleSet,
   StoredApiInput,
   StrategyConfig,
+  StrategyPosition,
   UserSettings,
 } from '../shared/types'
 import type { AppStatePatch } from '../shared/app-state-events'
 import { DEFAULT_WATCHLIST, normalizeSymbolInput, normalizeWatchlistSymbols } from '../shared/market-symbols'
+import {
+  applyStrategyOrder,
+  rebuildStrategyPositions,
+  updateStrategyPositionMark as updateStrategyPositionMarkList,
+} from '../shared/strategy-positions'
 
 interface ApiRecord extends ApiProfile {
   encryptedSecret: string
@@ -113,11 +119,11 @@ SHORT: rsi14 > 60 && bbPctB > 0.55 && closeLocation > 0.65 && volumeRatio > 0.8 
 CLOSE_SHORT: unrealizedPnlPct > 0.006 || unrealizedPnlPct < -0.01 || drawdownSinceEntry > 0.035 || barsHeld > 10 || (close < ma20 && unrealizedPnlPct > 0.001) || rsi14 < 45
 POSITION: 0.8`
 
-const sol5mLongShortPulseScript = `LONG: close > ma120 * 0.98 && ma20 > ma60 * 0.996 && momentum5 > 0.01 && momentum20 > 0.01 && rsi14 > 5 && rsi14 < 62 && volumeRatio > 0.05 && bbPctB > -1 && bbPctB < 1 && closeLocation > 0.15 && factorScore > -2 && atrPct < 0.025
-CLOSE_LONG: unrealizedPnlPct > 0.006 || unrealizedPnlPct < -0.1 || drawdownSinceEntry > 0.035 || barsHeld > 768 || ((close < ma20 || maFast < maSlow || macd < macdSignal) && unrealizedPnlPct > 0.02) || (close < ma120 && momentum5 < -0.008)
-SHORT: close < ma120 * 0.9 && momentum5 < 0.015 && momentum20 < 0 && rsi14 > 10 && rsi14 < 65 && volumeRatio > 0.4 && bbPctB > -0.5 && bbPctB < 2 && closeLocation < 0.7 && factorScore < 1 && atrPct < 0.025
-CLOSE_SHORT: unrealizedPnlPct > 0.012 || unrealizedPnlPct < -0.035 || drawdownSinceEntry > 0.1 || barsHeld > 12 || ((close > ma20 || maFast > maSlow || macd > macdSignal) && unrealizedPnlPct > -0.03) || (close > ma120 * 1.16 && momentum5 > 0)
-POSITION: 0.8`
+const sol5mLongShortPulseScript = `LONG: close > ma120 * 0.985 && ma20 > ma60 * 1 && momentum5 > 0.008 && momentum20 > 0.01 && rsi14 > 5 && rsi14 < 62 && volumeRatio > 0.1 && bbPctB > -1 && bbPctB < 1.2 && closeLocation > 0.15 && factorScore > 0 && atrPct < 0.02
+CLOSE_LONG: unrealizedPnlPct > 0.004 || unrealizedPnlPct < -0.05 || drawdownSinceEntry > 0.035 || barsHeld > 768 || ((close < ma20 || maFast < maSlow || macd < macdSignal) && unrealizedPnlPct > 0.02) || (close < ma120 && momentum5 < -0.004)
+SHORT: close < ma120 * 0.9 && momentum5 < 0.008 && momentum20 < -0.004 && rsi14 > 8 && rsi14 < 68 && volumeRatio > 0.1 && bbPctB > -0.5 && bbPctB < 1.7 && closeLocation < 0.5 && factorScore < 1 && atrPct < 0.025
+CLOSE_SHORT: unrealizedPnlPct > 0.008 || unrealizedPnlPct < -0.04 || drawdownSinceEntry > 0.03 || barsHeld > 12 || ((close > ma20 || maFast > maSlow || macd > macdSignal) && unrealizedPnlPct > 0.006) || (close > ma120 * 1.12 && momentum5 > -0.004)
+POSITION: 0.7`
 
 const defaultPreferences: AppPreferences = {
   selectedSymbol: 'BTCUSDT',
@@ -228,6 +234,7 @@ const defaultState: PersistedState = {
   ],
   assets: [],
   positions: [],
+  strategyPositions: [],
   orders: [],
   logs: [
     {
@@ -395,6 +402,7 @@ export class LocalStore {
       preferences: normalizePreferences(parsed.preferences),
       strategies: normalizeStrategies(parsed.strategies),
       riskRules: { ...defaultRiskRules, ...parsed.riskRules },
+      strategyPositions: rebuildStrategyPositions(parsed.orders ?? []),
       apiRecords,
     }
   }
@@ -519,12 +527,23 @@ export class LocalStore {
     return this.state.positions
   }
 
+  async updateStrategyPositionMark(strategyId: string, symbol: string, markPrice: number): Promise<StrategyPosition | undefined> {
+    const next = updateStrategyPositionMarkList(this.state.strategyPositions, strategyId, symbol, markPrice)
+    if (next !== this.state.strategyPositions) {
+      this.state.strategyPositions = next
+      await this.save()
+      this.publishChange({ strategyPositions: this.state.strategyPositions })
+    }
+    return this.state.strategyPositions.find((position) => position.strategyId === strategyId && position.symbol === symbol)
+  }
+
   async addOrder(order: OrderRecord): Promise<OrderRecord> {
     this.state.orders.unshift(order)
     this.state.orders = this.state.orders.slice(0, 180)
+    this.state.strategyPositions = applyStrategyOrder(this.state.strategyPositions, order)
     this.addLog('trade', 'info', `订单已记录：${order.symbol} ${order.side} ${order.quantity} ${order.status}`, order.strategyId)
     await this.save()
-    this.publishChange({ orders: this.state.orders })
+    this.publishChange({ orders: this.state.orders, strategyPositions: this.state.strategyPositions })
     return order
   }
 

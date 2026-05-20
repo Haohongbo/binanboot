@@ -16,10 +16,12 @@ import type {
   OrderRecord,
   RiskEvent,
   RiskRuleSet,
+  StrategyPosition,
   StrategyConfig,
   UserSettings,
 } from '../../shared/types'
 import type { AppStatePatch as SharedAppStatePatch } from '../../shared/app-state-events'
+import { applyStrategyOrder, rebuildStrategyPositions } from '../../shared/strategy-positions'
 import { INITIAL_TICKERS } from './lib/market-stream'
 import { makeInitialTicker, normalizeSymbolInput, normalizeWatchlistSymbols } from '../../shared/market-symbols'
 
@@ -62,6 +64,7 @@ interface QuantStore {
   logs: LogEntry[]
   assets: AccountAsset[]
   positions: AccountPosition[]
+  strategyPositions: StrategyPosition[]
   apiProfiles: ApiProfile[]
   backtestParams: BacktestParams
   backtestResult: BacktestResult | null
@@ -100,6 +103,7 @@ interface QuantStore {
   removeApiProfile: (id: string) => void
   setAssets: (assets: AccountAsset[]) => void
   setPositions: (positions: AccountPosition[]) => void
+  setStrategyPositions: (positions: StrategyPosition[]) => void
   setBacktestParams: (params: Partial<BacktestParams>) => void
   setBacktestResult: (result: BacktestResult | null) => void
   setBacktestRunMeta: (meta: BacktestRunMeta) => void
@@ -306,6 +310,7 @@ export const useQuantStore = create<QuantStore>((set, get) => ({
   logs: [],
   assets: [],
   positions: [],
+  strategyPositions: [],
   apiProfiles: [],
   backtestParams: {
     symbol: 'BTCUSDT',
@@ -372,6 +377,7 @@ export const useQuantStore = create<QuantStore>((set, get) => ({
       logs: snapshot.logs,
       assets: snapshot.assets,
       positions: snapshot.positions,
+      strategyPositions: snapshot.strategyPositions ?? rebuildStrategyPositions(snapshot.orders),
       apiProfiles: snapshot.apiProfiles,
     })
   },
@@ -384,6 +390,7 @@ export const useQuantStore = create<QuantStore>((set, get) => ({
       logs: snapshot.logs,
       assets: snapshot.assets,
       positions: snapshot.positions,
+      strategyPositions: snapshot.strategyPositions ?? rebuildStrategyPositions(snapshot.orders),
       apiProfiles: snapshot.apiProfiles,
     }),
   applyStatePatch: (patch) =>
@@ -397,6 +404,7 @@ export const useQuantStore = create<QuantStore>((set, get) => ({
       if (patch.riskEvents) nextState.riskEvents = patch.riskEvents
       if (patch.assets) nextState.assets = patch.assets
       if (patch.positions) nextState.positions = patch.positions
+      if (patch.strategyPositions) nextState.strategyPositions = patch.strategyPositions
       if (patch.orders) nextState.orders = patch.orders
       if (patch.logs) nextState.logs = patch.logs
       if (patch.apiProfiles) nextState.apiProfiles = patch.apiProfiles
@@ -614,7 +622,10 @@ export const useQuantStore = create<QuantStore>((set, get) => ({
   setStrategies: (strategies) => set({ strategies }),
   setRiskRules: (riskRules) => set({ riskRules }),
   addRiskEvent: (event) => set((state) => ({ riskEvents: [event, ...state.riskEvents].slice(0, 80) })),
-  addOrder: (order) => set((state) => ({ orders: [order, ...state.orders].slice(0, 180) })),
+  addOrder: (order) => set((state) => ({
+    orders: [order, ...state.orders].slice(0, 180),
+    strategyPositions: applyStrategyOrder(state.strategyPositions, order),
+  })),
   addLog: (entry) => set((state) => ({ logs: [entry, ...state.logs].slice(0, 240) })),
   setLogs: (logs) => set({ logs }),
   setApiProfiles: (apiProfiles) => set({ apiProfiles }),
@@ -627,6 +638,7 @@ export const useQuantStore = create<QuantStore>((set, get) => ({
   removeApiProfile: (id) => set((state) => ({ apiProfiles: state.apiProfiles.filter((item) => item.id !== id) })),
   setAssets: (assets) => set({ assets }),
   setPositions: (positions) => set({ positions }),
+  setStrategyPositions: (strategyPositions) => set({ strategyPositions }),
   setBacktestParams: (params) => set((state) => ({ backtestParams: { ...state.backtestParams, ...params } })),
   setBacktestResult: (backtestResult) => set({ backtestResult: normalizeBacktestResult(backtestResult) }),
   setBacktestRunMeta: (meta) => set(meta),

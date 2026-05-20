@@ -7,7 +7,6 @@ import {
   ArrowUp,
   BarChart3,
   Bell,
-  BookOpenCheck,
   Bot,
   Briefcase,
   CircleDollarSign,
@@ -26,6 +25,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Square,
+  PenLine,
   UserCircle,
   X,
 } from 'lucide-react'
@@ -39,6 +39,7 @@ import type {
   PositionSide,
   RiskEvent,
   RiskLevel,
+  StrategyPosition,
   StrategyConfig,
   UserSettings,
 } from '../../shared/types'
@@ -108,6 +109,16 @@ function findSymbolPosition(positions: AccountPosition[], symbol: string): Accou
 function positionDisplay(position: AccountPosition): string {
   const side = position.positionSide === 'BOTH' ? (position.positionAmount < 0 ? 'SHORT' : 'LONG') : position.positionSide
   return `${side} ${formatNumber(Math.abs(position.positionAmount), 4)}`
+}
+
+function findStrategyPosition(positions: StrategyPosition[], strategyId: string, symbol: string): StrategyPosition | undefined {
+  return positions
+    .filter((position) => position.strategyId === strategyId && position.symbol === symbol)
+    .sort((left, right) => right.updateTime - left.updateTime)[0]
+}
+
+function strategyPositionDisplay(position: StrategyPosition): string {
+  return `${position.positionAmount < 0 ? 'SHORT' : 'LONG'} ${formatNumber(Math.abs(position.positionAmount), 4)}`
 }
 
 function hasLiveStrategyExposure(strategy: StrategyConfig): boolean {
@@ -190,6 +201,8 @@ function App(): ReactElement {
   useWatchlistTickerSync()
   useAccountAutoSync()
   const [riskToast, setRiskToast] = useState<RiskEvent | null>(null)
+  const [showIndicators, setShowIndicators] = useState(true)
+  const [drawingMode, setDrawingMode] = useState(false)
   const latestRiskEventIdRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
@@ -240,8 +253,12 @@ function App(): ReactElement {
           selectedInterval={selectedInterval}
           onSelectSymbol={setSelectedSymbol}
           onSelectInterval={setSelectedInterval}
+          showIndicators={showIndicators}
+          drawingMode={drawingMode}
+          onToggleIndicators={() => setShowIndicators((current) => !current)}
+          onToggleDrawing={() => setDrawingMode((current) => !current)}
         />
-        <Content />
+        <Content showIndicators={showIndicators} drawingMode={drawingMode} />
       </main>
       {riskToast && (
         <div className={`risk-toast ${riskClass(riskToast.level)}`} role="alert">
@@ -507,11 +524,19 @@ function Toolbar({
   selectedInterval,
   onSelectSymbol,
   onSelectInterval,
+  showIndicators,
+  drawingMode,
+  onToggleIndicators,
+  onToggleDrawing,
 }: {
   selectedSymbol: string
   selectedInterval: CandleInterval
   onSelectSymbol: (symbol: string) => void
   onSelectInterval: (interval: CandleInterval) => void
+  showIndicators: boolean
+  drawingMode: boolean
+  onToggleIndicators: () => void
+  onToggleDrawing: () => void
 }): ReactElement {
   const { liveMode, setLiveMode, marketStatus, currentMarket, watchlist } = useQuantStore()
   const bestBid = currentMarket?.bids[0]?.price
@@ -549,12 +574,22 @@ function Toolbar({
         ))}
       </div>
       <div className="toolbar-tools">
-        <button className="ghost-button">
+        <button
+          className={showIndicators ? 'ghost-button active' : 'ghost-button'}
+          onClick={onToggleIndicators}
+          aria-pressed={showIndicators}
+          title={showIndicators ? '隐藏指标' : '显示指标'}
+        >
           <SlidersHorizontal size={16} />
           指标
         </button>
-        <button className="ghost-button">
-          <BookOpenCheck size={16} />
+        <button
+          className={drawingMode ? 'ghost-button active' : 'ghost-button'}
+          onClick={onToggleDrawing}
+          aria-pressed={drawingMode}
+          title={drawingMode ? '退出画线' : '进入画线'}
+        >
+          <PenLine size={16} />
           画线
         </button>
         <label className="mode-toggle">
@@ -571,7 +606,7 @@ function Toolbar({
   )
 }
 
-function Content(): ReactElement {
+function Content({ showIndicators, drawingMode }: { showIndicators: boolean; drawingMode: boolean }): ReactElement {
   const activePage = useQuantStore((state) => state.activePage)
   if (activePage === 'strategies') return <StrategiesPage />
   if (activePage === 'strategy-diagnostics') return <StrategyDiagnosticsPage />
@@ -582,10 +617,10 @@ function Content(): ReactElement {
   if (activePage === 'api') return <ApiPage />
   if (activePage === 'logs') return <LogsPage />
   if (activePage === 'settings') return <SettingsPage />
-  return <Dashboard />
+  return <Dashboard showIndicators={showIndicators} drawingMode={drawingMode} />
 }
 
-function Dashboard(): ReactElement {
+function Dashboard({ showIndicators, drawingMode }: { showIndicators: boolean; drawingMode: boolean }): ReactElement {
   const market = useQuantStore((state) => state.currentMarket)
   const topTickers = useQuantStore((state) => state.topTickers)
   const strategies = useQuantStore((state) => state.strategies)
@@ -594,13 +629,13 @@ function Dashboard(): ReactElement {
   const orders = useQuantStore((state) => state.orders)
   const backtestResult = useQuantStore((state) => state.backtestResult)
   const indicators = useMemo(() => {
-    if (!market?.candles.length) return null
+    if (!showIndicators || !market?.candles.length) return null
     return {
       rsi: rsi(market.candles),
       macd: macd(market.candles),
       boll: bollinger(market.candles),
     }
-  }, [market?.candles])
+  }, [market?.candles, showIndicators])
 
   const accountValue = assets.reduce((sum, item) => sum + assetValue(item, undefined, topTickers), 0)
   const accountPnl = assets.reduce((sum, item) => sum + item.unrealizedPnl, 0)
@@ -629,7 +664,7 @@ function Dashboard(): ReactElement {
             </div>
           )}
         </div>
-        <MarketChart market={market} />
+        <MarketChart market={market} showIndicators={showIndicators} drawingMode={drawingMode} />
       </section>
       <OrderBookPanel />
       <RecentTradesPanel />
@@ -734,7 +769,7 @@ function RecentTradesPanel(): ReactElement {
 }
 
 function StrategyRunPanel(): ReactElement {
-  const { strategies, setStrategies, liveMode, apiProfiles, positions, setActivePage } = useQuantStore()
+  const { strategies, setStrategies, liveMode, apiProfiles, strategyPositions, setActivePage } = useQuantStore()
   const [updatingStrategyId, setUpdatingStrategyId] = useState('')
   const [draggedStrategyId, setDraggedStrategyId] = useState('')
   const [dragOverStrategyId, setDragOverStrategyId] = useState('')
@@ -802,7 +837,9 @@ function StrategyRunPanel(): ReactElement {
       </div>
       <div className="strategy-list">
         {strategies.slice(0, 5).map((strategy, index) => {
-          const position = hasLiveStrategyExposure(strategy) ? findSymbolPosition(positions, strategy.symbol) : undefined
+          const position = hasLiveStrategyExposure(strategy)
+            ? findStrategyPosition(strategyPositions, strategy.id, strategy.symbol)
+            : undefined
           return (
             <div
               className={`strategy-row draggable-row ${draggedStrategyId === strategy.id ? 'dragging' : ''} ${dragOverStrategyId === strategy.id ? 'drag-over' : ''}`}
@@ -837,7 +874,7 @@ function StrategyRunPanel(): ReactElement {
                 <span>{symbolDisplay(strategy.symbol)} · {formatRuntime(strategy.runtimeMs)}</span>
                 <span className="position-line">
                   {position
-                    ? `${positionDisplay(position)} · 入场 ${formatPrice(position.entryPrice)} · 标记 ${formatPrice(position.markPrice)}`
+                    ? `${strategyPositionDisplay(position)} · 入场 ${formatPrice(position.entryPrice)} · 现价 ${formatPrice(position.markPrice)}`
                     : '无持仓'}
                 </span>
               </div>
@@ -1105,7 +1142,7 @@ function KpiStrip({ items }: { items: Array<{ label: string; value: string; delt
 }
 
 function StrategiesPage(): ReactElement {
-  const { strategies, setStrategies, selectedSymbol, positions } = useQuantStore()
+  const { strategies, setStrategies, selectedSymbol, strategyPositions } = useQuantStore()
   const [editingStrategyId, setEditingStrategyId] = useState('')
   const [draggedStrategyId, setDraggedStrategyId] = useState('')
   const [dragOverStrategyId, setDragOverStrategyId] = useState('')
@@ -1381,7 +1418,9 @@ function StrategiesPage(): ReactElement {
           {strategies.length === 0 ? (
             <EmptyRow text="暂无策略。请先在左侧创建一个策略。" />
           ) : strategies.map((strategy, index) => {
-            const position = hasLiveStrategyExposure(strategy) ? findSymbolPosition(positions, strategy.symbol) : undefined
+            const position = hasLiveStrategyExposure(strategy)
+              ? findStrategyPosition(strategyPositions, strategy.id, strategy.symbol)
+              : undefined
             return (
             <div
               className={`table-row draggable-row ${draggedStrategyId === strategy.id ? 'dragging' : ''} ${dragOverStrategyId === strategy.id ? 'drag-over' : ''}`}
@@ -1416,7 +1455,7 @@ function StrategiesPage(): ReactElement {
                   {strategy.name}
                 </strong>
                 <em>{symbolDisplay(strategy.symbol)} · {strategy.type}</em>
-                <em>{position ? positionDisplay(position) : '无持仓'}</em>
+                <em>{position ? `${strategyPositionDisplay(position)} · 入场 ${formatPrice(position.entryPrice)} · 现价 ${formatPrice(position.markPrice)}` : '无持仓'}</em>
               </span>
               <span>
                 {formatMoney(strategy.orderAmount)} / 仓位 {strategy.maxPositionRatio}%
@@ -1453,7 +1492,7 @@ function StrategiesPage(): ReactElement {
 }
 
 function StrategyDiagnosticsPage(): ReactElement {
-  const { strategies, logs, orders, positions, setActivePage, setLogs } = useQuantStore()
+  const { strategies, logs, orders, strategyPositions, setActivePage, setLogs } = useQuantStore()
   const runningStrategies = useMemo(
     () => strategies.filter((strategy) => strategy.status === 'running' || strategy.status === 'tripped'),
     [strategies],
@@ -1476,7 +1515,9 @@ function StrategyDiagnosticsPage(): ReactElement {
     () => orders.filter((order) => order.strategyId === selectedStrategy?.id).slice(0, 12),
     [orders, selectedStrategy?.id],
   )
-  const selectedPosition = selectedStrategy && hasLiveStrategyExposure(selectedStrategy) ? findSymbolPosition(positions, selectedStrategy.symbol) : undefined
+  const selectedPosition = selectedStrategy && hasLiveStrategyExposure(selectedStrategy)
+    ? findStrategyPosition(strategyPositions, selectedStrategy.id, selectedStrategy.symbol)
+    : undefined
   const recentLogs = selectedLogs.slice(0, 80)
   const latestSignalLog = recentLogs.find((log) => log.message.startsWith('信号诊断'))
 
@@ -1504,7 +1545,7 @@ function StrategyDiagnosticsPage(): ReactElement {
             <EmptyRow text="当前没有运行中的策略。" />
           ) : (
             runningStrategies.map((strategy) => {
-              const position = findSymbolPosition(positions, strategy.symbol)
+              const position = findStrategyPosition(strategyPositions, strategy.id, strategy.symbol)
               const isActive = strategy.id === selectedStrategy?.id
               return (
                 <button
@@ -1514,7 +1555,7 @@ function StrategyDiagnosticsPage(): ReactElement {
                 >
                   <strong>{strategy.name}</strong>
                   <span>{symbolDisplay(strategy.symbol)} · {strategy.interval}</span>
-                  <span>{position ? positionDisplay(position) : '无持仓'}</span>
+                  <span>{position ? `${strategyPositionDisplay(position)} · 入场 ${formatPrice(position.entryPrice)} · 现价 ${formatPrice(position.markPrice)}` : '无持仓'}</span>
                   <em className={strategyPnlClass(strategy)}>{strategyPnlText(strategy)}</em>
                 </button>
               )
@@ -1549,7 +1590,7 @@ function StrategyDiagnosticsPage(): ReactElement {
               </div>
               <div>
                 <span>持仓</span>
-                <strong>{selectedPosition ? positionDisplay(selectedPosition) : '无持仓'}</strong>
+                <strong>{selectedPosition ? `${strategyPositionDisplay(selectedPosition)} · 入场 ${formatPrice(selectedPosition.entryPrice)} · 现价 ${formatPrice(selectedPosition.markPrice)}` : '无持仓'}</strong>
               </div>
               <div>
                 <span>日志数</span>
@@ -1908,7 +1949,7 @@ function BacktestMetrics(): ReactElement {
 }
 
 function OrdersPage(): ReactElement {
-  const { apiProfiles, selectedSymbol, currentMarket, addOrder, orders, liveMode } = useQuantStore()
+  const { apiProfiles, selectedSymbol, currentMarket, addOrder, orders, liveMode, strategies } = useQuantStore()
   const defaultLiveProfileId = useMemo(() => {
     const liveProfiles = apiProfiles.filter((profile) => profile.environment === 'live')
     return (
@@ -1918,6 +1959,7 @@ function OrdersPage(): ReactElement {
       ''
     )
   }, [apiProfiles])
+  const strategyNameById = useMemo(() => new Map(strategies.map((strategy) => [strategy.id, strategy.name])), [strategies])
   const [ticket, setTicket] = useState({
     apiProfileId: 'paper',
     side: 'BUY' as OrderSide,
@@ -2055,6 +2097,7 @@ function OrdersPage(): ReactElement {
           <div className="table-row head">
             <span>时间</span>
             <span>交易对</span>
+            <span>策略</span>
             <span>方向</span>
             <span>持仓</span>
             <span>类型</span>
@@ -2070,6 +2113,7 @@ function OrdersPage(): ReactElement {
               <div className="table-row" key={order.id}>
                 <span>{formatDate(order.time)}</span>
                 <span>{symbolDisplay(order.symbol)}</span>
+                <span title={order.strategyId}>{order.strategyId ? (strategyNameById.get(order.strategyId) ?? order.strategyId.slice(0, 8)) : '--'}</span>
                 <span className={order.side === 'BUY' ? 'up' : 'down'}>{order.side}</span>
                 <span>{order.positionSide ?? '--'}</span>
                 <span>{order.type}</span>

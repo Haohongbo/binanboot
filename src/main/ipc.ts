@@ -51,6 +51,7 @@ function makePaperOrder(input: PlaceOrderInput, marketPrice: number): OrderRecor
     type: input.type,
     price: input.type === 'LIMIT' ? input.price ?? marketPrice : marketPrice,
     quantity: input.quantity,
+    executedQuantity: input.quantity,
     status: 'FILLED',
     strategyId: input.strategyId,
     idempotencyKey: input.idempotencyKey,
@@ -67,6 +68,7 @@ function makeFailedOrder(input: PlaceOrderInput, marketPrice: number, reason: st
     type: input.type,
     price: input.type === 'LIMIT' ? input.price ?? marketPrice : marketPrice,
     quantity: input.quantity,
+    executedQuantity: 0,
     status: 'FAILED',
     strategyId: input.strategyId,
     idempotencyKey: input.idempotencyKey,
@@ -498,20 +500,6 @@ export function registerIpc(store: LocalStore, analytics?: AnalyticsStore): void
     await store.updatePositions(account.positions)
     if (account.assets.length > 0) {
       await store.updateAssets(account.assets)
-      const snapshot = store.snapshot()
-      const strategiesWithPnl = snapshot.strategies.map((strategy) => {
-        if (strategy.status !== 'running' && strategy.status !== 'tripped') {
-          return strategy.pnl === 0 ? strategy : { ...strategy, pnl: 0 }
-        }
-        const position = account.positions.find(
-          (item) =>
-            item.symbol === strategy.symbol &&
-            Math.abs(item.positionAmount) > 0 &&
-            (item.positionSide === 'BOTH' || item.positionSide === 'LONG' || item.positionSide === 'SHORT'),
-        )
-        return position ? { ...strategy, pnl: position.unrealizedPnl } : (strategy.pnl === 0 ? strategy : { ...strategy, pnl: 0 })
-      })
-      await store.upsertStrategies(strategiesWithPnl)
       store.addLog('api', 'info', `已同步账户资产，余额资产 ${account.assets.length} 项，持仓 ${account.positions.length} 项。`)
       await store.save()
     }

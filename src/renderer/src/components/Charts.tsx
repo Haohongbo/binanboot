@@ -1,5 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent, ReactElement } from 'react'
+import {
+  Trash2,
+} from 'lucide-react'
 import {
   AreaSeries,
   CandlestickSeries,
@@ -11,25 +14,79 @@ import {
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
+  type MouseEventParams,
+  type Time,
   type UTCTimestamp,
 } from 'lightweight-charts'
 import type { BacktestResult, MarketSnapshot } from '../../../shared/types'
 import { formatDate, formatMoney, formatNumber, formatRatio } from '../lib/format'
-import { crossoverSignals, movingAverage } from '../lib/indicators'
+import { bollingerBands, crossoverSignals, movingAverage } from '../lib/indicators'
 
-export function MarketChart({ market }: { market: MarketSnapshot | null }): ReactElement {
+type DrawPoint = {
+  time: UTCTimestamp
+  price: number
+}
+
+type DrawLine = {
+  id: string
+  start: DrawPoint
+  end: DrawPoint
+}
+
+function lineId(): string {
+  return `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function toUtcTimestamp(time: Time | null | undefined): UTCTimestamp | null {
+  return typeof time === 'number' ? (time as UTCTimestamp) : null
+}
+
+function resolveDrawPoint(
+  param: MouseEventParams<Time>,
+  chart: IChartApi | null,
+  series: ISeriesApi<'Candlestick'> | null,
+): DrawPoint | null {
+  const point = param.point
+  if (!point || !chart || !series) return null
+  const time = toUtcTimestamp(param.time ?? chart.timeScale().coordinateToTime(point.x))
+  const price = series.coordinateToPrice(point.y)
+  if (time == null || price == null) return null
+  return { time, price: Number(price) }
+}
+
+export function MarketChart({
+  market,
+  showIndicators,
+  drawingMode,
+}: {
+  market: MarketSnapshot | null
+  showIndicators: boolean
+  drawingMode: boolean
+}): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const ma5Ref = useRef<ISeriesApi<'Line'> | null>(null)
   const ma20Ref = useRef<ISeriesApi<'Line'> | null>(null)
+  const bollUpperRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const bollMiddleRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const bollLowerRef = useRef<ISeriesApi<'Line'> | null>(null)
   const quoteLineRef = useRef<IPriceLine | null>(null)
+  const drawStartRef = useRef<DrawPoint | null>(null)
   const lastFitKeyRef = useRef<string | null>(null)
   const lastDataKeyRef = useRef<string | null>(null)
   const lastCandleCountRef = useRef(0)
+  const [overlayVersion, setOverlayVersion] = useState(0)
+  const [drawnLines, setDrawnLines] = useState<DrawLine[]>([])
+  const [draftLine, setDraftLine] = useState<DrawLine | null>(null)
+
+  const bumpOverlay = useCallback(() => {
+    setOverlayVersion((version) => version + 1)
+  }, [])
 
   const data = useMemo(() => {
     if (!market) return null
+    const boll = bollingerBands(market.candles)
     return {
       candles: market.candles.map((candle) => ({
         time: Math.floor(candle.time / 1000) as UTCTimestamp,
@@ -40,6 +97,11 @@ export function MarketChart({ market }: { market: MarketSnapshot | null }): Reac
       })),
       ma5: movingAverage(market.candles, 5).map((item) => ({ ...item, time: item.time as UTCTimestamp })),
       ma20: movingAverage(market.candles, 20).map((item) => ({ ...item, time: item.time as UTCTimestamp })),
+      boll: {
+        upper: boll.upper.map((item) => ({ ...item, time: item.time as UTCTimestamp })),
+        middle: boll.middle.map((item) => ({ ...item, time: item.time as UTCTimestamp })),
+        lower: boll.lower.map((item) => ({ ...item, time: item.time as UTCTimestamp })),
+      },
       markers: crossoverSignals(market.candles),
     }
   }, [market])
@@ -116,11 +178,28 @@ export function MarketChart({ market }: { market: MarketSnapshot | null }): Reac
       color: '#8f61ff',
       lineWidth: 2,
     })
+    const bollUpper = chart.addSeries(LineSeries, {
+      color: 'rgba(77, 141, 255, 0.85)',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+    })
+    const bollMiddle = chart.addSeries(LineSeries, {
+      color: 'rgba(143, 97, 255, 0.9)',
+      lineWidth: 1,
+    })
+    const bollLower = chart.addSeries(LineSeries, {
+      color: 'rgba(39, 214, 162, 0.85)',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+    })
 
     chartRef.current = chart
     candleRef.current = candles
     ma5Ref.current = ma5
     ma20Ref.current = ma20
+    bollUpperRef.current = bollUpper
+    bollMiddleRef.current = bollMiddle
+    bollLowerRef.current = bollLower
 
     let resizeFrame = 0
     const resize = (): void => {
@@ -129,27 +208,36 @@ export function MarketChart({ market }: { market: MarketSnapshot | null }): Reac
       resizeFrame = requestAnimationFrame(() => {
         if (!containerRef.current || chartRef.current !== chart) return
         chart.applyOptions({ width: Math.max(containerRef.current.clientWidth, 320) })
+        bumpOverlay()
       })
     }
     const observer = new ResizeObserver(resize)
     observer.observe(containerRef.current)
     window.addEventListener('resize', resize)
+    const onVisibleRangeChange = (): void => bumpOverlay()
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRangeChange)
+    candles.subscribeDataChanged(bumpOverlay)
     requestAnimationFrame(resize)
     return () => {
       if (resizeFrame) cancelAnimationFrame(resizeFrame)
       observer.disconnect()
       window.removeEventListener('resize', resize)
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRangeChange)
+      candles.unsubscribeDataChanged(bumpOverlay)
       chart.remove()
       chartRef.current = null
       candleRef.current = null
       ma5Ref.current = null
       ma20Ref.current = null
+      bollUpperRef.current = null
+      bollMiddleRef.current = null
+      bollLowerRef.current = null
       quoteLineRef.current = null
       lastFitKeyRef.current = null
       lastDataKeyRef.current = null
       lastCandleCountRef.current = 0
     }
-  }, [containerRef])
+  }, [bumpOverlay, containerRef])
 
   useEffect(() => {
     if (!data || !candleRef.current || !ma5Ref.current || !ma20Ref.current || !chartRef.current) return
@@ -169,15 +257,20 @@ export function MarketChart({ market }: { market: MarketSnapshot | null }): Reac
     }
     ma5Ref.current.setData(data.ma5)
     ma20Ref.current.setData(data.ma20)
+    bollUpperRef.current?.setData(showIndicators ? data.boll.upper : [])
+    bollMiddleRef.current?.setData(showIndicators ? data.boll.middle : [])
+    bollLowerRef.current?.setData(showIndicators ? data.boll.lower : [])
     const fitKey = market ? `${market.symbol}:${market.interval}` : null
     if (fitKey && fitKey !== lastFitKeyRef.current) {
       requestAnimationFrame(() => {
         if (!chartRef.current) return
         chartRef.current.timeScale().fitContent()
+        bumpOverlay()
       })
       lastFitKeyRef.current = fitKey
     }
-  }, [data, market])
+    bumpOverlay()
+  }, [bumpOverlay, data, market, showIndicators])
 
   useEffect(() => {
     const midPrice = market?.quoteMidPrice
@@ -204,7 +297,114 @@ export function MarketChart({ market }: { market: MarketSnapshot | null }): Reac
     })
   }, [market?.quoteMidPrice, market?.bids, market?.asks])
 
-  return <div className="chart-root" ref={containerRef} />
+  useEffect(() => {
+    if (!drawingMode) {
+      drawStartRef.current = null
+      setDraftLine(null)
+    }
+  }, [drawingMode])
+
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart || !drawingMode) return undefined
+
+    const handleClick = (param: MouseEventParams<Time>): void => {
+      const point = resolveDrawPoint(param, chart, candleRef.current)
+      if (!point) return
+      const start = drawStartRef.current
+      if (!start) {
+        drawStartRef.current = point
+        setDraftLine({ id: 'draft', start: point, end: point })
+        return
+      }
+      drawStartRef.current = null
+      setDraftLine(null)
+      setDrawnLines((current) => [
+        ...current,
+        {
+          id: lineId(),
+          start,
+          end: point,
+        },
+      ])
+      bumpOverlay()
+    }
+
+    const handleMove = (param: MouseEventParams<Time>): void => {
+      if (!drawStartRef.current) return
+      const point = resolveDrawPoint(param, chart, candleRef.current)
+      if (!point) return
+      setDraftLine({
+        id: 'draft',
+        start: drawStartRef.current,
+        end: point,
+      })
+      bumpOverlay()
+    }
+
+    chart.subscribeClick(handleClick)
+    chart.subscribeCrosshairMove(handleMove)
+    return () => {
+      chart.unsubscribeClick(handleClick)
+      chart.unsubscribeCrosshairMove(handleMove)
+    }
+  }, [bumpOverlay, drawingMode])
+
+  const overlayLines = useMemo(() => {
+    const chart = chartRef.current
+    const series = candleRef.current
+    if (!chart || !series) return []
+    const toPoints = (line: DrawLine) => {
+      const startX = chart.timeScale().timeToCoordinate(line.start.time)
+      const endX = chart.timeScale().timeToCoordinate(line.end.time)
+      const startY = series.priceToCoordinate(line.start.price)
+      const endY = series.priceToCoordinate(line.end.price)
+      if (startX == null || endX == null || startY == null || endY == null) return null
+      return {
+        id: line.id,
+        x1: Number(startX),
+        y1: Number(startY),
+        x2: Number(endX),
+        y2: Number(endY),
+      }
+    }
+    return [...drawnLines, ...(draftLine ? [draftLine] : [])].map(toPoints).filter((line): line is NonNullable<ReturnType<typeof toPoints>> => line !== null)
+  }, [draftLine, drawnLines, overlayVersion])
+
+  function clearDrawings(): void {
+    drawStartRef.current = null
+    setDraftLine(null)
+    setDrawnLines([])
+    bumpOverlay()
+  }
+
+  return (
+    <div className={drawingMode ? 'chart-root drawing-mode' : 'chart-root'} ref={containerRef}>
+      {(drawnLines.length > 0 || draftLine) && (
+        <button
+          className="chart-clear-drawings"
+          title="清除全部画线"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            clearDrawings()
+          }}
+        >
+          <Trash2 size={14} />
+          清除画线
+        </button>
+      )}
+      <svg className="chart-drawings" aria-hidden="true">
+        {overlayLines.map((line) => (
+          <g key={line.id}>
+            <line className={line.id === 'draft' ? 'draw-line draft' : 'draw-line'} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+            <circle className="draw-handle" cx={line.x1} cy={line.y1} r="3" />
+            <circle className="draw-handle" cx={line.x2} cy={line.y2} r="3" />
+          </g>
+        ))}
+      </svg>
+    </div>
+  )
 }
 
 export function MiniAreaChart({

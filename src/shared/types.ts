@@ -163,10 +163,21 @@ export interface OrderRecord {
   type: OrderType
   price: number
   quantity: number
+  executedQuantity?: number
   status: OrderStatus
   strategyId?: string
   idempotencyKey: string
   failureReason?: string
+}
+
+export interface StrategyPosition {
+  strategyId: string
+  symbol: string
+  positionAmount: number
+  entryPrice: number
+  markPrice: number
+  unrealizedPnl: number
+  updateTime: number
 }
 
 export interface BacktestParams {
@@ -288,6 +299,7 @@ export interface AppStateSnapshot {
   riskEvents: RiskEvent[]
   assets: AccountAsset[]
   positions: AccountPosition[]
+  strategyPositions: StrategyPosition[]
   orders: OrderRecord[]
   logs: LogEntry[]
   apiProfiles: ApiProfile[]

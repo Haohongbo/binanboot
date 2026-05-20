@@ -125,6 +125,7 @@ const seedSnapshot: AppStateSnapshot = {
   ],
   assets: [],
   positions: [],
+  strategyPositions: [],
   orders: [],
   logs: [
     {
@@ -293,6 +294,7 @@ function currentSnapshot(): AppStateSnapshot {
     riskEvents: state.riskEvents.length ? state.riskEvents : seedSnapshot.riskEvents,
     assets: state.assets.length ? state.assets : seedSnapshot.assets,
     positions: state.positions.length ? state.positions : seedSnapshot.positions,
+    strategyPositions: state.strategyPositions.length ? state.strategyPositions : seedSnapshot.strategyPositions,
     orders: state.orders,
     logs: state.logs.length ? state.logs : seedSnapshot.logs,
     apiProfiles: state.apiProfiles,
@@ -392,6 +394,7 @@ export function createBrowserQuantApi(): QuantApi {
         type: input.type,
         price: input.type === 'LIMIT' ? input.price ?? marketPrice : marketPrice,
         quantity: input.quantity,
+        executedQuantity: input.quantity,
         status: 'FILLED',
         strategyId: input.strategyId,
         idempotencyKey: input.idempotencyKey,

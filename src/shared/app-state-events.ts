@@ -7,6 +7,7 @@ import type {
   OrderRecord,
   RiskEvent,
   RiskRuleSet,
+  StrategyPosition,
   StrategyConfig,
 } from './types'
 
@@ -19,6 +20,7 @@ export interface AppStatePatch {
   riskEvents?: RiskEvent[]
   assets?: AccountAsset[]
   positions?: AccountPosition[]
+  strategyPositions?: StrategyPosition[]
   orders?: OrderRecord[]
   logs?: LogEntry[]
   apiProfiles?: ApiProfile[]

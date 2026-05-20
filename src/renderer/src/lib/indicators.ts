@@ -47,6 +47,28 @@ export function bollinger(candles: Candle[], period = 20, multiplier = 2): { upp
   }
 }
 
+export function bollingerBands(
+  candles: Candle[],
+  period = 20,
+  multiplier = 2,
+): { upper: Array<{ time: number; value: number }>; middle: Array<{ time: number; value: number }>; lower: Array<{ time: number; value: number }> } {
+  const upper: Array<{ time: number; value: number }> = []
+  const middle: Array<{ time: number; value: number }> = []
+  const lower: Array<{ time: number; value: number }> = []
+  candles.forEach((candle, index) => {
+    if (index + 1 < period) return
+    const slice = candles.slice(index + 1 - period, index + 1)
+    const mid = slice.reduce((sum, item) => sum + item.close, 0) / slice.length
+    const variance = slice.reduce((sum, item) => sum + Math.pow(item.close - mid, 2), 0) / slice.length
+    const deviation = Math.sqrt(variance)
+    const time = Math.floor(candle.time / 1000)
+    upper.push({ time, value: mid + multiplier * deviation })
+    middle.push({ time, value: mid })
+    lower.push({ time, value: mid - multiplier * deviation })
+  })
+  return { upper, middle, lower }
+}
+
 export function macd(candles: Candle[]): { dif: number; dea: number; hist: number } {
   const closes = candles.map((item) => item.close)
   if (closes.length < 26) return { dif: 0, dea: 0, hist: 0 }

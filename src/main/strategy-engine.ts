@@ -10,13 +10,18 @@ import {
 } from './binance'
 import type { LocalStore } from './store'
 import type {
-  AccountPosition,
   Candle,
   OrderRecord,
   OrderSide,
   RiskEvent,
   StrategyConfig,
+  StrategyPosition,
 } from '../shared/types'
+import {
+  calculateStrategyUnrealizedPnl,
+  findStrategyPosition,
+  strategyPositionSide,
+} from '../shared/strategy-positions'
 import {
   buildSignalContext,
   evalScriptExpression,
@@ -222,30 +227,30 @@ export class StrategyExecutionEngine {
 
       const account = await getFuturesAccount(credentials)
       await this.store.updatePositions(account.positions)
-      const currentPosition = this.findStrategyPosition(account.positions, strategy.symbol)
-      await this.syncExternalPositionState(strategy, currentPosition)
-      await this.syncStrategyPnl(strategy, currentPosition?.unrealizedPnl ?? 0)
-
-      if (currentPosition && currentPosition.leverage > rules.maxLeverage) {
-        await this.tripStrategy(strategy, 'warning', '持仓杠杆风控触发', `当前 ${strategy.symbol} 杠杆 ${currentPosition.leverage}x 超过全局限制 ${rules.maxLeverage}x。`)
-        return
-      }
-
-      if (currentPosition && currentPosition.unrealizedPnl < -Math.max(1, account.summary.totalWalletBalance) * (rules.strategyMaxLoss / 100)) {
-        await this.tripStrategy(strategy, 'danger', '单策略亏损风控触发', `${strategy.symbol} 未实现亏损 ${currentPosition.unrealizedPnl.toFixed(2)} USDT 超过阈值。`)
-        return
-      }
-
       const candles = await getKlines(strategy.symbol, strategy.interval, 140, profile.environment)
       const index = latestClosedCandleIndex(candles, strategy.interval)
       if (index < 60) return
       const candle = candles[index]
       if (this.lastCandleByStrategy.get(strategy.id) === candle.time) return
 
+      const snapshotAfterSync = this.store.snapshot()
+      let currentPosition = findStrategyPosition(snapshotAfterSync.strategyPositions, strategy.id, strategy.symbol)
+      if (currentPosition) {
+        currentPosition = await this.store.updateStrategyPositionMark(strategy.id, strategy.symbol, candle.close) ?? currentPosition
+      }
+      await this.syncExternalPositionState(strategy, currentPosition)
+      const currentUnrealizedPnl = currentPosition ? calculateStrategyUnrealizedPnl(currentPosition, candle.close) : 0
+      await this.syncStrategyPnl(strategy, currentUnrealizedPnl)
+
+      if (currentPosition && currentUnrealizedPnl < -Math.max(1, account.summary.totalWalletBalance) * (rules.strategyMaxLoss / 100)) {
+        await this.tripStrategy(strategy, 'danger', '单策略亏损风控触发', `${strategy.symbol} 未实现亏损 ${currentUnrealizedPnl.toFixed(2)} USDT 超过阈值。`)
+        return
+      }
+
       const entryCandleTime = this.entryCandleByStrategy.get(strategy.id)
-      const currentPositionSide = currentPosition ? this.positionSideNumber(currentPosition) : 0
+      const currentPositionSide = currentPosition ? (currentPosition.positionAmount < 0 ? -1 : 1) : 0
       const latestBuyOrderTime = currentPosition
-        ? snapshot.orders.find((order) =>
+        ? snapshotAfterSync.orders.find((order) =>
             order.strategyId === strategy.id &&
             order.symbol === strategy.symbol &&
             order.side === (currentPositionSide < 0 ? 'SELL' : 'BUY')
@@ -257,8 +262,8 @@ export class StrategyExecutionEngine {
       const effectiveEntryCandleTime = entryCandleTime ?? inferredEntryCandleTime
       const entryIndex = effectiveEntryCandleTime === undefined ? undefined : candles.findIndex((item) => item.time === effectiveEntryCandleTime)
       const context = buildSignalContext(candles, index, {
-        entryPrice: currentPosition ? this.resolveEntryPrice(currentPosition, candle.close) : undefined,
-        position: currentPosition ? Math.abs(currentPosition.positionAmount) * currentPositionSide : undefined,
+        entryPrice: currentPosition ? this.resolveEntryPrice(currentPosition) : undefined,
+        position: currentPosition ? currentPosition.positionAmount : undefined,
         entryIndex: entryIndex !== undefined && entryIndex >= 0 ? entryIndex : undefined,
       })
       const script = parseScriptRules(strategy.customScript, {
@@ -348,7 +353,7 @@ export class StrategyExecutionEngine {
     positionRatio: number,
     leverage: number,
     side: OrderSide,
-    positionSide: AccountPosition['positionSide'],
+    positionSide: 'LONG' | 'SHORT',
     candleTime: number,
   ): Promise<void> {
     const key = idempotencyKey(strategy.id, side, candleTime)
@@ -406,9 +411,9 @@ export class StrategyExecutionEngine {
     strategy: StrategyConfig,
     credentials: Credentials,
     apiProfileId: string,
-    position: AccountPosition,
+    position: StrategyPosition,
     side: OrderSide,
-    positionSide: AccountPosition['positionSide'],
+    positionSide: 'LONG' | 'SHORT',
     candleTime: number,
   ): Promise<void> {
     const tradeRules = await getSymbolTradeRules(strategy.symbol, credentials.environment)
@@ -433,25 +438,8 @@ export class StrategyExecutionEngine {
     await this.recordOrder(strategy, order, `${positionSide} 平仓信号触发，已使用 reduceOnly 平仓。`)
   }
 
-  private findStrategyPosition(positions: AccountPosition[], symbol: string): AccountPosition | undefined {
-    return positions.find(
-      (position) =>
-        position.symbol === symbol &&
-        Math.abs(position.positionAmount) > 0 &&
-        (position.positionSide === 'BOTH' || position.positionSide === 'LONG' || position.positionSide === 'SHORT'),
-    )
-  }
-
-  private positionSideNumber(position: AccountPosition): number {
-    if (position.positionSide === 'SHORT') return -1
-    if (position.positionSide === 'LONG') return 1
-    return position.positionAmount < 0 ? -1 : 1
-  }
-
-  private resolveEntryPrice(position: AccountPosition, fallbackPrice: number): number {
-    if (position.entryPrice > 0) return position.entryPrice
-    if (position.positionAmount !== 0 && position.notional !== 0) return Math.abs(position.notional / position.positionAmount)
-    return fallbackPrice
+  private resolveEntryPrice(position: StrategyPosition): number {
+    return position.entryPrice > 0 ? position.entryPrice : 0
   }
 
   private formatPercent(value: number, digits = 2): string {
@@ -572,7 +560,7 @@ export class StrategyExecutionEngine {
   }
 
   private describeEntryBlockReason(
-    currentPosition: AccountPosition | undefined,
+    currentPosition: StrategyPosition | undefined,
     currentPositionSide: number,
     shouldLong: boolean,
     shouldShort: boolean,
@@ -591,7 +579,7 @@ export class StrategyExecutionEngine {
     rules: ScriptRules,
     context: SignalContext,
     evaluation: SignalEvaluation,
-    currentPosition: AccountPosition | undefined,
+    currentPosition: StrategyPosition | undefined,
     currentPositionSide: number,
   ): Promise<void> {
     const stateSummary = [
@@ -643,31 +631,30 @@ export class StrategyExecutionEngine {
     )
   }
 
-  private positionSignature(position: AccountPosition | undefined): string {
+  private positionSignature(position: StrategyPosition | undefined): string {
     if (!position || Math.abs(position.positionAmount) <= 0) return 'flat'
     return [
+      position.strategyId,
       position.symbol,
-      position.positionSide,
       position.positionAmount.toFixed(8),
       position.entryPrice.toFixed(8),
-      position.leverage,
     ].join(':')
   }
 
-  private async syncExternalPositionState(strategy: StrategyConfig, position: AccountPosition | undefined): Promise<void> {
+  private async syncExternalPositionState(strategy: StrategyConfig, position: StrategyPosition | undefined): Promise<void> {
     const signature = this.positionSignature(position)
     const previous = this.lastPositionByStrategy.get(strategy.id)
     if (previous === signature) return
     this.lastPositionByStrategy.set(strategy.id, signature)
     if (!previous && signature === 'flat') return
     if (signature === 'flat') {
-      this.store.addLog('strategy', 'info', `策略「${strategy.name}」已同步交易所仓位：${strategy.symbol} 当前无持仓。`, strategy.id)
+      this.store.addLog('strategy', 'info', `策略「${strategy.name}」已同步策略仓位：${strategy.symbol} 当前无持仓。`, strategy.id)
     } else if (position) {
-      const side = position.positionSide === 'BOTH' ? (position.positionAmount < 0 ? 'SHORT' : 'LONG') : position.positionSide
+      const side = strategyPositionSide(position)
       this.store.addLog(
         'strategy',
         'info',
-        `策略「${strategy.name}」已同步交易所当前持仓：${strategy.symbol} ${side} ${Math.abs(position.positionAmount).toFixed(6)}，均价 ${this.formatValue(this.resolveEntryPrice(position, 0), 4)}，后续平仓将按当前仓位 reduceOnly 执行。`,
+        `策略「${strategy.name}」已同步策略当前持仓：${strategy.symbol} ${side} ${Math.abs(position.positionAmount).toFixed(6)}，均价 ${this.formatValue(this.resolveEntryPrice(position), 4)}。`,
         strategy.id,
       )
     }

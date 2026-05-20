@@ -706,6 +706,7 @@ export async function placeFuturesOrder(credentials: Credentials, input: PlaceOr
     price?: string
     avgPrice?: string
     origQty?: string
+    executedQty?: string
     status?: OrderRecord['status']
   }>('POST', '/fapi/v1/order', credentials, params)
 
@@ -718,6 +719,7 @@ export async function placeFuturesOrder(credentials: Credentials, input: PlaceOr
     type: input.type,
     price: toNumber(result.avgPrice, toNumber(result.price, input.price ?? 0)),
     quantity: toNumber(result.origQty, input.quantity),
+    executedQuantity: toNumber(result.executedQty, result.status === 'FILLED' ? toNumber(result.origQty, input.quantity) : 0),
     status: result.status ?? 'NEW',
     strategyId: input.strategyId,
     idempotencyKey: input.idempotencyKey,

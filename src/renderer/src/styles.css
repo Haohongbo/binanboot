@@ -669,6 +669,12 @@ button {
   white-space: nowrap;
 }
 
+.ghost-button.active {
+  background: rgba(77, 141, 255, 0.16);
+  border-color: rgba(77, 141, 255, 0.42);
+  color: #fff;
+}
+
 .primary-button {
   background: linear-gradient(135deg, #2d7cff, #2353d9);
   border-color: transparent;
@@ -784,6 +790,8 @@ button {
 }
 
 .chart-root {
+  position: relative;
+  isolation: isolate;
   flex: 1;
   min-height: 420px;
   padding: 0 8px 8px;
@@ -794,6 +802,58 @@ button {
 
 .chart-root:active {
   cursor: grabbing;
+}
+
+.chart-root.drawing-mode {
+  cursor: crosshair;
+  box-shadow: inset 0 0 0 1px rgba(77, 141, 255, 0.18);
+}
+
+.chart-clear-drawings {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 107, 107, 0.28);
+  background: rgba(16, 27, 38, 0.95);
+  color: #ffd1d1;
+}
+
+.chart-clear-drawings:hover {
+  border-color: rgba(255, 107, 107, 0.45);
+  background: rgba(31, 22, 27, 0.98);
+}
+
+.chart-drawings {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.draw-line {
+  stroke: rgba(247, 183, 57, 0.9);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.draw-line.draft {
+  stroke-dasharray: 5 5;
+  opacity: 0.76;
+}
+
+.draw-handle {
+  fill: rgba(247, 183, 57, 0.95);
+  stroke: rgba(12, 19, 28, 0.85);
+  stroke-width: 1;
 }
 
 .orderbook-panel {
@@ -1819,8 +1879,8 @@ button {
 }
 
 .order-record-table .table-row {
-  grid-template-columns: 132px 96px 70px 72px 76px 100px 96px 92px minmax(110px, 1fr);
-  min-width: 900px;
+  grid-template-columns: 132px 96px minmax(110px, 1fr) 70px 72px 76px 100px 96px 92px minmax(110px, 1fr);
+  min-width: 1020px;
 }
 
 .asset-balance-table .table-row {
