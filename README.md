@@ -37,6 +37,8 @@ git push origin v$(node -p "require('./package.json').version")
 
 也可以在 GitHub 的 Actions 页面手动运行 `Build release` 工作流。
 
+完整教程见：[GitHub 版本更新与多平台构建发布教程](docs/github-release-update-guide.md)。
+
 ## 目录
 
 - `src/main`：主进程、SQLite 持久化、Binance / 飞书集成
