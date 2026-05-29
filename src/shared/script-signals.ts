@@ -62,6 +62,17 @@ export type SignalContext = {
   lowestSinceEntry: number
   drawdownSinceEntry: number
   factorScore: number
+  htfMaFast: number
+  htfMaSlow: number
+  htfMa20: number
+  htfMa60: number
+  htfMomentum5: number
+  htfMomentum20: number
+  htfRsi14: number
+  htfVolumeRatio: number
+  htfBbPctB: number
+  htfAtrPct: number
+  htfTrendScore: number
 }
 
 export type SignalPositionState = {
@@ -155,6 +166,35 @@ function emaSeries(values: number[], period: number): number[] {
   return result
 }
 
+function inferIntervalMs(candles: Candle[], fallback = 300_000): number {
+  const diffs: number[] = []
+  for (let index = 1; index < Math.min(candles.length, 40); index += 1) {
+    const diff = candles[index].time - candles[index - 1].time
+    if (diff > 0) diffs.push(diff)
+  }
+  if (diffs.length === 0) return fallback
+  diffs.sort((left, right) => left - right)
+  return diffs[Math.floor(diffs.length / 2)] || fallback
+}
+
+function resampleCandles(candles: Candle[], intervalMs: number): Candle[] {
+  if (candles.length === 0) return []
+  const buckets = new Map<number, Candle>()
+  for (const candle of candles) {
+    const bucketTime = Math.floor(candle.time / intervalMs) * intervalMs
+    const existing = buckets.get(bucketTime)
+    if (!existing) {
+      buckets.set(bucketTime, { ...candle, time: bucketTime })
+      continue
+    }
+    existing.high = Math.max(existing.high, candle.high)
+    existing.low = Math.min(existing.low, candle.low)
+    existing.close = candle.close
+    existing.volume += candle.volume
+  }
+  return [...buckets.values()].sort((left, right) => left.time - right.time)
+}
+
 type SignalSeries = {
   maFast: number[]
   maSlow: number[]
@@ -177,7 +217,22 @@ type SignalSeries = {
   bbLower: number[]
 }
 
+type HigherTimeframeSeries = {
+  maFast: number[]
+  maSlow: number[]
+  ma20: number[]
+  ma60: number[]
+  momentum5: number[]
+  momentum20: number[]
+  rsi14: number[]
+  volumeRatio: number[]
+  bbPctB: number[]
+  atrPct: number[]
+  trendScore: number[]
+}
+
 const signalSeriesCache = new WeakMap<Candle[], SignalSeries>()
+const higherTimeframeSeriesCache = new WeakMap<Candle[], HigherTimeframeSeries>()
 
 function getSignalSeries(candles: Candle[]): SignalSeries {
   const cached = signalSeriesCache.get(candles)
@@ -278,9 +333,123 @@ function getSignalSeries(candles: Candle[]): SignalSeries {
   return series
 }
 
+function getHigherTimeframeSeries(candles: Candle[]): HigherTimeframeSeries {
+  const cached = higherTimeframeSeriesCache.get(candles)
+  if (cached) return cached
+
+  const baseIntervalMs = inferIntervalMs(candles)
+  const resampledCandles = resampleCandles(candles, 15 * 60_000)
+  if (resampledCandles.length === 0) {
+    const empty: HigherTimeframeSeries = {
+      maFast: [],
+      maSlow: [],
+      ma20: [],
+      ma60: [],
+      momentum5: [],
+      momentum20: [],
+      rsi14: [],
+      volumeRatio: [],
+      bbPctB: [],
+      atrPct: [],
+      trendScore: [],
+    }
+    higherTimeframeSeriesCache.set(candles, empty)
+    return empty
+  }
+
+  const closes = resampledCandles.map((candle) => candle.close)
+  const volumes = resampledCandles.map((candle) => candle.volume)
+  const maFast = rollingAverage(closes, 5)
+  const maSlow = rollingAverage(closes, 14)
+  const ma20 = rollingAverage(closes, 20)
+  const ma60 = rollingAverage(closes, 60)
+  const trueRange: number[] = []
+  const rsi14: number[] = []
+  const atr14: number[] = []
+  const bbUpper: number[] = []
+  const bbMiddle: number[] = []
+  const bbLower: number[] = []
+
+  for (let index = 0; index < resampledCandles.length; index += 1) {
+    const candle = resampledCandles[index]
+    const previousClose = resampledCandles[index - 1]?.close ?? candle.close
+    trueRange.push(Math.max(candle.high - candle.low, Math.abs(candle.high - previousClose), Math.abs(candle.low - previousClose)))
+
+    let gains = 0
+    let losses = 0
+    for (let itemIndex = Math.max(1, index - 13); itemIndex <= index; itemIndex += 1) {
+      const delta = resampledCandles[itemIndex].close - resampledCandles[itemIndex - 1].close
+      if (delta >= 0) gains += delta
+      else losses += Math.abs(delta)
+    }
+    rsi14.push(index < 14 ? 50 : losses === 0 ? 100 : 100 - 100 / (1 + gains / losses))
+
+    const atrFrom = Math.max(0, index - 13)
+    const atrSum = trueRange.slice(atrFrom, index + 1).reduce((sum, item) => sum + item, 0)
+    atr14.push(atrSum / Math.max(1, index - atrFrom + 1))
+
+    const bbFrom = Math.max(0, index - 19)
+    const bbCloses = closes.slice(bbFrom, index + 1)
+    const middle = bbCloses.reduce((sum, item) => sum + item, 0) / Math.max(1, bbCloses.length)
+    const bbVariance = bbCloses.reduce((sum, item) => sum + Math.pow(item - middle, 2), 0) / Math.max(1, bbCloses.length)
+    const deviation = Math.sqrt(bbVariance)
+    bbMiddle.push(middle)
+    bbUpper.push(middle + 2 * deviation)
+    bbLower.push(middle - 2 * deviation)
+  }
+
+  const volumeBase = rollingAverage(volumes, 31)
+  const volumeRatio = volumes.map((volume, index) => (volumeBase[index] > 0 ? volume / volumeBase[index] : 1))
+  const momentum5 = closes.map((_, index) => momentumAt(resampledCandles, index, 5))
+  const momentum20 = closes.map((_, index) => momentumAt(resampledCandles, index, 20))
+
+  const htfTrendScore = closes.map((close, index) => {
+    const bandRange = bbUpper[index] - bbLower[index]
+    return (
+      (maFast[index] > maSlow[index] ? 1 : -1) +
+      (momentum5[index] > 0.018 ? 0.7 : momentum5[index] < -0.018 ? -0.7 : 0) +
+      (momentum20[index] > 0.01 ? 0.45 : momentum20[index] < -0.01 ? -0.45 : 0) +
+      (rsi14[index] > 58 ? 0.35 : rsi14[index] < 42 ? -0.35 : 0) +
+      (volumeRatio[index] > 1.05 ? 0.2 : 0) +
+      (bandRange > 0 ? ((close - bbMiddle[index]) / bandRange > 0.55 ? 0.1 : -0.1) : 0)
+    )
+  })
+
+  const availableIndex: number[] = []
+  let htfIndex = -1
+  for (let index = 0; index < candles.length; index += 1) {
+    const availableCloseTime = candles[index].time + baseIntervalMs
+    while (htfIndex + 1 < resampledCandles.length && resampledCandles[htfIndex + 1].time + 15 * 60_000 <= availableCloseTime) {
+      htfIndex += 1
+    }
+    availableIndex.push(htfIndex)
+  }
+
+  const series: HigherTimeframeSeries = {
+    maFast: availableIndex.map((index) => (index >= 0 ? maFast[index] : 0)),
+    maSlow: availableIndex.map((index) => (index >= 0 ? maSlow[index] : 0)),
+    ma20: availableIndex.map((index) => (index >= 0 ? ma20[index] : 0)),
+    ma60: availableIndex.map((index) => (index >= 0 ? ma60[index] : 0)),
+    momentum5: availableIndex.map((index) => (index >= 0 ? momentum5[index] : 0)),
+    momentum20: availableIndex.map((index) => (index >= 0 ? momentum20[index] : 0)),
+    rsi14: availableIndex.map((index) => (index >= 0 ? rsi14[index] : 50)),
+    volumeRatio: availableIndex.map((index) => (index >= 0 ? volumeRatio[index] : 1)),
+    bbPctB: availableIndex.map((index) => {
+      if (index < 0) return 0.5
+      const bandRange = bbUpper[index] - bbLower[index]
+      return bandRange > 0 ? (closes[index] - bbLower[index]) / bandRange : 0.5
+    }),
+    atrPct: availableIndex.map((index) => (index >= 0 ? (closes[index] > 0 ? atr14[index] / closes[index] : 0) : 0)),
+    trendScore: availableIndex.map((index) => (index >= 0 ? htfTrendScore[index] : 0)),
+  }
+  higherTimeframeSeriesCache.set(candles, series)
+  return series
+}
+
 export function buildSignalContext(candles: Candle[], index: number, state: SignalPositionState = {}): SignalContext {
   const candle = candles[index]
   const series = getSignalSeries(candles)
+  const htfSeries = getHigherTimeframeSeries(candles)
   const previousClose = candles[index - 1]?.close ?? candle.open
   const maFast = series.maFast[index]
   const maSlow = series.maSlow[index]
@@ -399,5 +568,16 @@ export function buildSignalContext(candles: Candle[], index: number, state: Sign
     lowestSinceEntry,
     drawdownSinceEntry,
     factorScore,
+    htfMaFast: htfSeries.maFast[index] ?? 0,
+    htfMaSlow: htfSeries.maSlow[index] ?? 0,
+    htfMa20: htfSeries.ma20[index] ?? 0,
+    htfMa60: htfSeries.ma60[index] ?? 0,
+    htfMomentum5: htfSeries.momentum5[index] ?? 0,
+    htfMomentum20: htfSeries.momentum20[index] ?? 0,
+    htfRsi14: htfSeries.rsi14[index] ?? 50,
+    htfVolumeRatio: htfSeries.volumeRatio[index] ?? 1,
+    htfBbPctB: htfSeries.bbPctB[index] ?? 0.5,
+    htfAtrPct: htfSeries.atrPct[index] ?? 0,
+    htfTrendScore: htfSeries.trendScore[index] ?? 0,
   }
 }

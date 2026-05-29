@@ -1,10 +1,13 @@
-# SOL 5m One-Year High Return
+# SOL 5m Multi-Window High Return (1x, aggressive)
 
-Backtest window used locally:
-- 2025-05-20 00:00 UTC to 2026-05-20 00:00 UTC
-- 105,121 candles
-- Binance futures SOLUSDT 5m
+Local optimization window:
+- 2025-11-12 00:00 UTC to 2026-05-20 18:30 UTC
+- 54,655 candles
+- Binance futures SOLUSDT 5m, with 15m higher-timeframe features
 
 Notes:
-- The app backtest uses the global max leverage from risk rules.
-- Local leveraged backtest with the default 5x risk setting came out at about 298.76% total return, 83.70% win rate, 2.32 profit factor, 17.45% max drawdown, and 92 closed trades.
+- 30d: 3.21% return, 57.14% win, 7 closed, 4.68% max DD
+- 60d: 22.24% return, 76.47% win, 17 closed, 7.05% max DD
+- 90d: 69.08% return, 78.13% win, 32 closed, 7.05% max DD
+- 180d: 117.20% return, 65.52% win, 87 closed, 11.21% max DD
+- This is the unleveraged 1x backtest result, aggressive profile.
