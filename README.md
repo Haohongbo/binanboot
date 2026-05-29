@@ -26,6 +26,16 @@ GH_TOKEN=你的GitHubToken npm run publish:win
 
 `GH_TOKEN` 需要有发布 Release 的权限。仓库如果保持私有，客户端检查更新也需要能访问私有 Release；面向普通用户分发时建议将 Release 可访问性改为公开。
 
+GitHub Actions 也会在推送 `v*` 标签时自动构建 Windows、macOS、Linux 安装包并上传到 Releases：
+
+```bash
+npm version patch
+git push
+git push origin v$(node -p "require('./package.json').version")
+```
+
+也可以在 GitHub 的 Actions 页面手动运行 `Build release` 工作流。
+
 ## 目录
 
 - `src/main`：主进程、SQLite 持久化、Binance / 飞书集成
