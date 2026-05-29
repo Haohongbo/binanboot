@@ -2424,6 +2424,16 @@ function SettingsPage(): ReactElement {
     }
   }
 
+  async function checkForUpdates(): Promise<void> {
+    await runUpdateAction(async () => {
+      const next = await window.quantApi.checkForUpdates()
+      if (next.phase === 'not-available') {
+        window.alert('没有发现新版本，当前已经是最新版本。')
+      }
+      return next
+    })
+  }
+
   const updatePhase = updateState?.phase ?? 'idle'
   const updateProgress = Math.max(0, Math.min(100, updateState?.progress?.percent ?? 0))
   const canCheckUpdate = !updateBusy && updatePhase !== 'checking' && updatePhase !== 'downloading'
@@ -2535,7 +2545,7 @@ function SettingsPage(): ReactElement {
               </div>
             ) : null}
             <div className="update-actions">
-              <button className="ghost-button" disabled={!canCheckUpdate} onClick={() => void runUpdateAction(() => window.quantApi.checkForUpdates())}>
+              <button className="ghost-button" disabled={!canCheckUpdate} onClick={() => void checkForUpdates()}>
                 <RefreshCw size={15} />
                 检查更新
               </button>
