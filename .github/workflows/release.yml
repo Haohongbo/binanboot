@@ -24,9 +24,6 @@ jobs:
           - name: macOS
             os: macos-latest
             target: --mac
-          - name: Linux
-            os: ubuntu-latest
-            target: --linux
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -41,10 +38,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-
-      - name: Install Linux package tools
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
 
       - name: Install dependencies
         run: npm ci

@@ -13,7 +13,9 @@
     "pack": "npm run typecheck && npm run build && electron-builder --dir",
     "dist": "npm run typecheck && npm run build && electron-builder",
     "dist:win": "npm run typecheck && npm run build && electron-builder --win",
-    "publish:win": "npm run typecheck && npm run build && electron-builder --win --publish always"
+    "dist:mac": "npm run typecheck && npm run build && electron-builder --mac",
+    "publish:win": "npm run typecheck && npm run build && electron-builder --win --publish always",
+    "publish:mac": "npm run typecheck && npm run build && electron-builder --mac --publish always"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.2-r.1",
