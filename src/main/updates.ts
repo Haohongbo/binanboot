@@ -1,5 +1,5 @@
 import { BrowserWindow, app, ipcMain, shell } from 'electron'
-import { autoUpdater } from 'electron-updater'
+import electronUpdater from 'electron-updater'
 import type { ProgressInfo, UpdateInfo } from 'builder-util-runtime'
 import type { LocalStore } from './store'
 import {
@@ -7,6 +7,8 @@ import {
   type AppUpdateProgress,
   type AppUpdateState,
 } from '../shared/updates'
+
+const { autoUpdater } = electronUpdater
 
 function cleanError(error: unknown): string {
   return String(error).replace(/^Error:\s*/, '').slice(0, 240)
