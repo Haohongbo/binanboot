@@ -11,10 +11,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pack": "npm run typecheck && npm run build && electron-builder --dir",
     "dist": "npm run typecheck && npm run build && electron-builder",
-    "dist:win": "npm run typecheck && npm run build && electron-builder --win"
+    "dist:win": "npm run typecheck && npm run build && electron-builder --win",
+    "publish:win": "npm run typecheck && npm run build && electron-builder --win --publish always"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.2-r.1",
+    "electron-updater": "^6.8.3",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^1.14.0",
     "react": "^19.2.6",

@@ -16,6 +16,16 @@ npm run build
 npm run typecheck
 ```
 
+## GitHub 版本发布
+
+应用内版本更新读取 GitHub Releases。发布 Windows 安装包前先更新 `package.json` 的 `version`，再执行：
+
+```bash
+GH_TOKEN=你的GitHubToken npm run publish:win
+```
+
+`GH_TOKEN` 需要有发布 Release 的权限。仓库如果保持私有，客户端检查更新也需要能访问私有 Release；面向普通用户分发时建议将 Release 可访问性改为公开。
+
 ## 目录
 
 - `src/main`：主进程、SQLite 持久化、Binance / 飞书集成

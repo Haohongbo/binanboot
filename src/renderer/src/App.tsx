@@ -12,6 +12,7 @@ import {
   CircleDollarSign,
   ClipboardList,
   DatabaseZap,
+  Download,
   FileClock,
   Gauge,
   GripVertical,
@@ -20,6 +21,8 @@ import {
   Pause,
   Play,
   Plus,
+  RefreshCw,
+  Rocket,
   ScrollText,
   Settings,
   ShieldCheck,
@@ -29,6 +32,7 @@ import {
   UserCircle,
   X,
 } from 'lucide-react'
+import type { AppUpdateState } from '../../shared/updates'
 import type {
   AccountPosition,
   BacktestParams,
@@ -2374,12 +2378,57 @@ function LogsPage(): ReactElement {
   )
 }
 
+function updatePhaseText(phase: AppUpdateState['phase']): string {
+  const labels: Record<AppUpdateState['phase'], string> = {
+    idle: '待检查',
+    checking: '检查中',
+    available: '可更新',
+    'not-available': '已最新',
+    downloading: '下载中',
+    downloaded: '待安装',
+    error: '异常',
+  }
+  return labels[phase]
+}
+
 function SettingsPage(): ReactElement {
   const { userSettings, setUserSettings } = useQuantStore()
+  const [updateState, setUpdateState] = useState<AppUpdateState | null>(null)
+  const [updateBusy, setUpdateBusy] = useState(false)
+
+  useEffect(() => {
+    let disposed = false
+    window.quantApi.getUpdateState().then((state) => {
+      if (!disposed) setUpdateState(state)
+    }).catch(() => undefined)
+    const removeListener = window.quantApi.onUpdateState((state) => {
+      setUpdateState(state)
+    })
+    return () => {
+      disposed = true
+      removeListener()
+    }
+  }, [])
 
   function patchSettings(patch: Partial<UserSettings>): void {
     setUserSettings({ ...userSettings, ...patch })
   }
+
+  async function runUpdateAction(action: () => Promise<AppUpdateState | void>): Promise<void> {
+    setUpdateBusy(true)
+    try {
+      const next = await action()
+      if (next) setUpdateState(next)
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+
+  const updatePhase = updateState?.phase ?? 'idle'
+  const updateProgress = Math.max(0, Math.min(100, updateState?.progress?.percent ?? 0))
+  const canCheckUpdate = !updateBusy && updatePhase !== 'checking' && updatePhase !== 'downloading'
+  const canDownloadUpdate = !updateBusy && updatePhase === 'available'
+  const canInstallUpdate = !updateBusy && updatePhase === 'downloaded'
 
   return (
     <div className="content single-page">
@@ -2460,6 +2509,48 @@ function SettingsPage(): ReactElement {
                 />
                 紧凑表格显示
               </label>
+            </div>
+          </section>
+
+          <section className="settings-section update-settings">
+            <div className="settings-section-head">
+              <div>
+                <h3>版本更新</h3>
+                <p>当前版本 {updateState?.currentVersion ?? '0.1.0'} · GitHub Release</p>
+              </div>
+              <span className={`update-badge ${updatePhase}`}>{updatePhaseText(updatePhase)}</span>
+            </div>
+            <div className="update-summary">
+              {updateState?.availableVersion ? (
+                <strong>发现版本 {updateState.availableVersion}</strong>
+              ) : (
+                <strong>暂无待安装版本</strong>
+              )}
+              <span>{updateState?.error ?? updateState?.message ?? '可以手动检查 GitHub 上的新版本。'}</span>
+              {updateState?.releaseDate ? <small>发布时间 {formatDate(new Date(updateState.releaseDate).getTime())}</small> : null}
+            </div>
+            {updatePhase === 'downloading' ? (
+              <div className="update-progress" aria-label="更新下载进度">
+                <span style={{ width: `${updateProgress}%` }} />
+              </div>
+            ) : null}
+            <div className="update-actions">
+              <button className="ghost-button" disabled={!canCheckUpdate} onClick={() => void runUpdateAction(() => window.quantApi.checkForUpdates())}>
+                <RefreshCw size={15} />
+                检查更新
+              </button>
+              <button className="primary-button" disabled={!canDownloadUpdate} onClick={() => void runUpdateAction(() => window.quantApi.downloadUpdate())}>
+                <Download size={15} />
+                下载
+              </button>
+              <button className="primary-button" disabled={!canInstallUpdate} onClick={() => void runUpdateAction(() => window.quantApi.installUpdate())}>
+                <Rocket size={15} />
+                重启安装
+              </button>
+              <button className="ghost-button" onClick={() => void window.quantApi.openReleases()}>
+                <FileClock size={15} />
+                Releases
+              </button>
             </div>
           </section>
 

@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { APP_STATE_PATCH_CHANNEL } from '../shared/app-state-events'
 import type { AppStatePatch } from '../shared/app-state-events'
+import { APP_UPDATE_STATE_CHANNEL } from '../shared/updates'
+import type { AppUpdateState } from '../shared/updates'
 import type {
   ApiProfile,
   AppPreferences,
@@ -44,12 +46,24 @@ const api = {
     ipcRenderer.invoke('market:cache-history', request),
   updatePreferences: (patch: Partial<AppPreferences>): Promise<AppPreferences> => ipcRenderer.invoke('preferences:update', patch),
   clearLogs: (filter?: LogClearFilter): Promise<LogEntry[]> => ipcRenderer.invoke('logs:clear', filter),
+  getUpdateState: (): Promise<AppUpdateState> => ipcRenderer.invoke('updates:state'),
+  checkForUpdates: (): Promise<AppUpdateState> => ipcRenderer.invoke('updates:check'),
+  downloadUpdate: (): Promise<AppUpdateState> => ipcRenderer.invoke('updates:download'),
+  installUpdate: (): Promise<AppUpdateState> => ipcRenderer.invoke('updates:install'),
+  openReleases: (): Promise<void> => ipcRenderer.invoke('updates:open-releases'),
   toggleWindowMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:toggle-maximize'),
   onStatePatch: (listener: (patch: AppStatePatch) => void): void => {
     const channel = (_event: IpcRendererEvent, patch: AppStatePatch) => {
       listener(patch)
     }
     ipcRenderer.on(APP_STATE_PATCH_CHANNEL, channel)
+  },
+  onUpdateState: (listener: (state: AppUpdateState) => void): (() => void) => {
+    const channel = (_event: IpcRendererEvent, state: AppUpdateState) => {
+      listener(state)
+    }
+    ipcRenderer.on(APP_UPDATE_STATE_CHANNEL, channel)
+    return () => ipcRenderer.removeListener(APP_UPDATE_STATE_CHANNEL, channel)
   },
 }
 

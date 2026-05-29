@@ -4,11 +4,13 @@ import { AnalyticsStore } from './analytics'
 import { registerIpc } from './ipc'
 import { LocalStore } from './store'
 import { StrategyExecutionEngine } from './strategy-engine'
+import { GitHubUpdateService, registerUpdateIpc } from './updates'
 import { APP_STATE_PATCH_CHANNEL } from '../shared/app-state-events'
 
 const store = new LocalStore()
 const analytics = new AnalyticsStore()
 const strategyEngine = new StrategyExecutionEngine(store)
+const updateService = new GitHubUpdateService(store)
 
 ipcMain.handle('window:toggle-maximize', (event) => {
   const window = BrowserWindow.fromWebContents(event.sender)
@@ -76,6 +78,7 @@ app.whenReady().then(async () => {
     }
   })
   registerIpc(store, analytics)
+  registerUpdateIpc(updateService)
   strategyEngine.start()
   await createWindow()
 

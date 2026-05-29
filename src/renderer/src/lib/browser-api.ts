@@ -16,6 +16,7 @@ import type {
   TradeTick,
 } from '../../../shared/types'
 import type { AppStatePatch } from '../../../shared/app-state-events'
+import type { AppUpdateState } from '../../../shared/updates'
 import { DEFAULT_WATCHLIST } from '../../../shared/market-symbols'
 import { useQuantStore } from '../store'
 
@@ -137,6 +138,14 @@ const seedSnapshot: AppStateSnapshot = {
     },
   ],
   apiProfiles: [],
+}
+
+const browserUpdateState: AppUpdateState = {
+  phase: 'idle',
+  currentVersion: '0.1.0',
+  isPackaged: false,
+  message: '浏览器预览模式不会连接 GitHub 更新源。',
+  updatedAt: Date.now(),
 }
 
 function randomId(): string {
@@ -437,7 +446,15 @@ export function createBrowserQuantApi(): QuantApi {
       state.setLogs(nextLogs)
       return nextLogs
     },
+    getUpdateState: async () => browserUpdateState,
+    checkForUpdates: async () => browserUpdateState,
+    downloadUpdate: async () => browserUpdateState,
+    installUpdate: async () => browserUpdateState,
+    openReleases: async () => {
+      window.open('https://github.com/Haohongbo/binanboot/releases', '_blank', 'noopener,noreferrer')
+    },
     toggleWindowMaximized: async () => false,
     onStatePatch: (_listener: (patch: AppStatePatch) => void) => undefined,
+    onUpdateState: (_listener: (state: AppUpdateState) => void) => () => undefined,
   }
 }

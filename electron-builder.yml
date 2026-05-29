@@ -9,6 +9,12 @@ asar: true
 asarUnpack:
   - node_modules/@duckdb/node-api/**
 
+publish:
+  provider: github
+  owner: Haohongbo
+  repo: binanboot
+  releaseType: release
+
 win:
   target:
     - target: nsis

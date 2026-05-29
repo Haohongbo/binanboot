@@ -680,6 +680,14 @@ button {
   border-color: transparent;
 }
 
+.ghost-button:disabled,
+.primary-button:disabled,
+.danger-button:disabled,
+.small-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
 .danger-button {
   background: linear-gradient(135deg, #e05050, #b02b2b);
   border-color: transparent;
@@ -2143,6 +2151,85 @@ button {
 
 .settings-field-wide {
   grid-column: 1 / -1;
+}
+
+.update-settings {
+  grid-column: 1 / -1;
+}
+
+.update-badge {
+  flex: none;
+  min-width: 72px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 163, 184, 0.18);
+  background: rgba(18, 25, 36, 0.68);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.update-badge.available,
+.update-badge.downloaded {
+  border-color: rgba(38, 194, 129, 0.34);
+  background: rgba(38, 194, 129, 0.12);
+  color: var(--green);
+}
+
+.update-badge.checking,
+.update-badge.downloading {
+  border-color: rgba(77, 141, 255, 0.36);
+  background: rgba(77, 141, 255, 0.14);
+  color: #8fb5ff;
+}
+
+.update-badge.error {
+  border-color: rgba(255, 107, 107, 0.36);
+  background: rgba(255, 107, 107, 0.12);
+  color: var(--red);
+}
+
+.update-summary {
+  display: grid;
+  gap: 5px;
+  min-height: 62px;
+  padding: 12px;
+  border: 1px solid rgba(145, 163, 184, 0.12);
+  border-radius: 10px;
+  background: rgba(18, 25, 36, 0.54);
+}
+
+.update-summary strong {
+  font-size: 14px;
+}
+
+.update-summary span,
+.update-summary small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.update-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(145, 163, 184, 0.14);
+}
+
+.update-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2d7cff, #26c281);
+  transition: width 160ms ease;
+}
+
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .switch-field {
