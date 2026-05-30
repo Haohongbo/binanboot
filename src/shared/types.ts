@@ -185,6 +185,7 @@ export interface BacktestParams {
   interval: CandleInterval
   initialCapital: number
   feeRate: number
+  leverage?: number
   from: number
   to: number
   strategyType: StrategyConfig['type']
@@ -235,7 +236,7 @@ export interface BacktestResult {
   initialCapital: number
   leverage: {
     value: number
-    source: 'binance-position' | 'risk-rule'
+    source: 'manual' | 'binance-position' | 'risk-rule'
     profileLabel?: string
     message?: string
   }

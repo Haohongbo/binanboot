@@ -317,6 +317,7 @@ export const useQuantStore = create<QuantStore>((set, get) => ({
     interval: '1h',
     initialCapital: 100_000,
     feeRate: 0.0004,
+    leverage: undefined,
     from: now - 180 * 86_400_000,
     to: now,
     strategyType: 'ma-cross',

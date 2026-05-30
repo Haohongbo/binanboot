@@ -257,9 +257,9 @@ function makeBacktest(params: BacktestParams): BacktestResult {
     source: 'mock',
     initialCapital: params.initialCapital,
     leverage: {
-      value: 1,
-      source: 'risk-rule',
-      message: '浏览器预览模式使用 1x 模拟杠杆。',
+      value: params.leverage ?? 1,
+      source: params.leverage ? 'manual' : 'risk-rule',
+      message: params.leverage ? '浏览器预览模式使用手动模拟杠杆。' : '浏览器预览模式使用 1x 模拟杠杆。',
     },
     candleCount: snapshot.candles.length,
     range: {

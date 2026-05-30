@@ -409,6 +409,15 @@ async function resolveBacktestLeverage(
   }
 }
 
+function resolveManualBacktestLeverage(value: number | undefined): BacktestResult['leverage'] | undefined {
+  if (!Number.isFinite(value) || value === undefined) return undefined
+  return {
+    value: Math.max(1, Math.min(125, Math.floor(value))),
+    source: 'manual',
+    message: '本次回测使用手动设置的杠杆。',
+  }
+}
+
 export function registerIpc(store: LocalStore, analytics?: AnalyticsStore): void {
   ipcMain.handle('app:snapshot', () => store.snapshot())
 
@@ -637,13 +646,13 @@ export function registerIpc(store: LocalStore, analytics?: AnalyticsStore): void
       await analytics?.recordMarketCandles(params.symbol, params.interval, candles)
       source = 'binance'
     }
-    const leverageInfo = await resolveBacktestLeverage(store, params.symbol, riskRules)
+    const leverageInfo = resolveManualBacktestLeverage(params.leverage) ?? await resolveBacktestLeverage(store, params.symbol, riskRules)
     const result = await runNaiveBacktest(params, candles, source, customStrategy, leverageInfo)
     void analytics?.recordBacktest(params, result)
     store.addLog(
       'strategy',
       'info',
-      `已使用 ${source === 'duckdb' ? 'DuckDB 本地缓存' : 'Binance 历史 K 线'} 完成 ${params.symbol} ${params.strategyType} 回测，杠杆 ${result.leverage.value}x（${result.leverage.source === 'binance-position' ? 'Binance 持仓接口' : '全局风控'}），区间样本 ${result.candleCount} 根，预热样本 ${Math.max(0, candles.length - result.candleCount)} 根，交易 ${result.metrics.trades} 笔。`,
+      `已使用 ${source === 'duckdb' ? 'DuckDB 本地缓存' : 'Binance 历史 K 线'} 完成 ${params.symbol} ${params.strategyType} 回测，杠杆 ${result.leverage.value}x（${result.leverage.source === 'manual' ? '手动设置' : result.leverage.source === 'binance-position' ? 'Binance 持仓接口' : '全局风控'}），区间样本 ${result.candleCount} 根，预热样本 ${Math.max(0, candles.length - result.candleCount)} 根，交易 ${result.metrics.trades} 笔。`,
     )
     await store.save()
     return result

@@ -1880,6 +1880,18 @@ function BacktestForm({ params, onChange }: { params: BacktestParams; onChange: 
         />
       </label>
       <label>
+        回测杠杆
+        <input
+          type="number"
+          min="1"
+          max="125"
+          step="1"
+          placeholder="自动"
+          value={params.leverage ?? ''}
+          onChange={(event) => onChange({ leverage: event.target.value === '' ? undefined : Number(event.target.value) })}
+        />
+      </label>
+      <label>
         开始时间
         <input type="date" value={dateDraft.from} onChange={(event) => setDateDraft((draft) => ({ ...draft, from: event.target.value }))} />
       </label>
@@ -1931,7 +1943,7 @@ function BacktestMetrics(): ReactElement {
   const leverage = (result as Partial<BacktestResult> | null)?.leverage
   const rows = [
     ['最终金额', finalEquity !== undefined ? formatMoney(finalEquity) : '--'],
-    ['回测杠杆', leverage ? `${leverage.value}x · ${leverage.source === 'binance-position' ? 'Binance' : '风控'}` : '--'],
+    ['回测杠杆', leverage ? `${leverage.value}x · ${leverage.source === 'manual' ? '手动' : leverage.source === 'binance-position' ? 'Binance' : '风控'}` : '--'],
     ['总收益率', metrics ? formatRatio(metrics.totalReturn) : '--'],
     ['年化收益率', metrics ? formatRatio(metrics.annualizedReturn) : '--'],
     ['最大回撤', metrics ? formatRatio(metrics.maxDrawdown) : '--'],

@@ -49,6 +49,7 @@ const defaultBacktestParams = {
   interval: '1h' as const,
   initialCapital: 100_000,
   feeRate: 0.0004,
+  leverage: undefined as number | undefined,
   from: Date.now() - 180 * 86_400_000,
   to: Date.now(),
   strategyType: 'ma-cross' as const,
@@ -72,6 +73,7 @@ function normalizeBacktestParams(backtestParams?: Partial<AppPreferences['backte
     ...next,
     initialCapital: Number.isFinite(next.initialCapital) && next.initialCapital > 0 ? next.initialCapital : defaultBacktestParams.initialCapital,
     feeRate: Number.isFinite(next.feeRate) && next.feeRate >= 0 ? next.feeRate : defaultBacktestParams.feeRate,
+    leverage: Number.isFinite(next.leverage) && Number(next.leverage) >= 1 ? Math.min(125, Math.floor(Number(next.leverage))) : undefined,
     from,
     to,
   }
@@ -119,11 +121,17 @@ SHORT: rsi14 > 60 && bbPctB > 0.55 && closeLocation > 0.65 && volumeRatio > 0.8 
 CLOSE_SHORT: unrealizedPnlPct > 0.006 || unrealizedPnlPct < -0.01 || drawdownSinceEntry > 0.035 || barsHeld > 10 || (close < ma20 && unrealizedPnlPct > 0.001) || rsi14 < 45
 POSITION: 0.8`
 
-const sol5mLongShortPulseScript = `LONG: close > ma120 * 0.985 && ma20 > ma60 * 0.997 && htfTrendScore > 0 && htfMomentum20 > -0.006 && momentum5 > 0.008 && momentum20 > 0 && rsi14 > 5 && rsi14 < 66 && volumeRatio > 0.05 && bbPctB > -1 && bbPctB < 1.2 && closeLocation > 0.5 && factorScore > -1 && atrPct < 0.026
+const previousSol5mLongShortPulseScript = `LONG: close > ma120 * 0.985 && ma20 > ma60 * 0.997 && htfTrendScore > 0 && htfMomentum20 > -0.006 && momentum5 > 0.008 && momentum20 > 0 && rsi14 > 5 && rsi14 < 66 && volumeRatio > 0.05 && bbPctB > -1 && bbPctB < 1.2 && closeLocation > 0.5 && factorScore > -1 && atrPct < 0.026
 CLOSE_LONG: unrealizedPnlPct > 0.04 || unrealizedPnlPct < -0.02 || drawdownSinceEntry > 0.05 || barsHeld > 288 || ((close < ma20 || maFast < maSlow || macd < macdSignal) && unrealizedPnlPct > 0.02)
 SHORT: close < ma120 * 0.94 && htfMomentum20 < 0 && momentum5 < -0.006 && momentum20 < -0.012 && rsi14 > 18 && rsi14 < 52 && volumeRatio > 0.1 && bbPctB > -0.5 && bbPctB < 1.7 && closeLocation < 0.8 && factorScore < 1.5 && atrPct < 0.022
 CLOSE_SHORT: unrealizedPnlPct > 0.03 || unrealizedPnlPct < -0.035 || drawdownSinceEntry > 0.025 || barsHeld > 48 || htfTrendScore > 0.2 || ((close > ma20 || maFast > maSlow || macd > macdSignal) && unrealizedPnlPct > 0.003)
 POSITION: 1`
+
+const sol5mLongShortPulseScript = `LONG: close > ma120 && ma20 > ma60 * 0.997 && htfTrendScore > 0 && htfMomentum20 > -0.006 && momentum5 > 0.008 && momentum20 > 0 && rsi14 > 5 && rsi14 < 66 && volumeRatio > 0.05 && bbPctB > -1 && bbPctB < 1.2 && closeLocation > 0.5 && factorScore > 0 && atrPct < 0.03
+CLOSE_LONG: unrealizedPnlPct > 0.04 || unrealizedPnlPct < -0.02 || drawdownSinceEntry > 0.05 || barsHeld > 288 || ((close < ma20 || maFast < maSlow || macd < macdSignal) && unrealizedPnlPct > 0.02)
+SHORT: close < ma120 * 0.98 && ma20 < ma60 * 1.004 && htfMomentum20 < 0 && momentum5 < -0.01 && momentum20 < 0.002 && rsi14 > 28 && rsi14 < 68 && volumeRatio > 0.1 && bbPctB > -0.5 && bbPctB < 1.7 && closeLocation < 0.8 && factorScore < 0 && atrPct < 0.018
+CLOSE_SHORT: unrealizedPnlPct > 0.03 || unrealizedPnlPct < -0.025 || drawdownSinceEntry > 0.025 || barsHeld > 48 || htfTrendScore > 0 || ((close > ma20 || maFast > maSlow || macd > macdSignal) && unrealizedPnlPct > 0.003)
+POSITION: 0.8`
 
 const defaultPreferences: AppPreferences = {
   selectedSymbol: 'BTCUSDT',
@@ -321,19 +329,22 @@ function normalizePreferences(preferences?: Partial<AppPreferences>): AppPrefere
 function normalizeStrategies(strategies?: StrategyConfig[]): StrategyConfig[] {
   const items = Array.isArray(strategies) ? strategies : defaultStrategies
   const requiredStrategies = defaultStrategies.filter((strategy) => strategy.id === 'script-sol-5m-long-short-pulse')
+  const upgradeableSol5mScripts = new Set([
+    legacySol5mLongShortPulseScript,
+    legacySol5mLooseScript,
+    legacySol5mMomentumPulseScript,
+    legacySol5mThirtyDayTrendScript,
+    previousSol5mLongShortPulseScript,
+  ])
   return [
-    ...items.map((strategy) =>
-      strategy.id === 'script-sol-5m-long-short-pulse' &&
-      (
-        !strategy.customScript ||
-        strategy.customScript === legacySol5mLongShortPulseScript ||
-        strategy.customScript === legacySol5mLooseScript ||
-        strategy.customScript === legacySol5mMomentumPulseScript ||
-        strategy.customScript === legacySol5mThirtyDayTrendScript
-      )
-        ? { ...strategy, customScript: sol5mLongShortPulseScript }
-        : strategy,
-    ),
+    ...items.map((strategy) => {
+      const isSol5mScript = strategy.type === 'script' && strategy.symbol === 'SOLUSDT' && strategy.interval === '5m'
+      const shouldUpgrade =
+        strategy.id === 'script-sol-5m-long-short-pulse'
+          ? !strategy.customScript || upgradeableSol5mScripts.has(strategy.customScript)
+          : isSol5mScript && strategy.customScript !== undefined && upgradeableSol5mScripts.has(strategy.customScript)
+      return shouldUpgrade ? { ...strategy, customScript: sol5mLongShortPulseScript } : strategy
+    }),
     ...requiredStrategies.filter((strategy) => !items.some((item) => item.id === strategy.id)),
   ]
 }

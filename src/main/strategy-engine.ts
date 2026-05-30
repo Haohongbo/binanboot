@@ -93,6 +93,21 @@ const percentLikeNames = new Set([
   'positionRatio',
 ])
 
+const transientConnectivityMarkers = [
+  '无法连接 Binance',
+  'net::ERR_NETWORK_CHANGED',
+  'net::ERR_INTERNET_DISCONNECTED',
+  'net::ERR_NETWORK_IO_SUSPENDED',
+  'net::ERR_NAME_NOT_RESOLVED',
+  'net::ERR_CONNECTION_RESET',
+  'net::ERR_CONNECTION_CLOSED',
+  'net::ERR_CONNECTION_TIMED_OUT',
+  'net::ERR_TIMED_OUT',
+  'fetch failed',
+  'network',
+  'tls',
+]
+
 function stripOuterParens(expression: string): string {
   let next = expression.trim()
   while (next.startsWith('(') && next.endsWith(')')) {
@@ -168,6 +183,7 @@ export class StrategyExecutionEngine {
   private readonly lastCandleByStrategy = new Map<string, number>()
   private readonly entryCandleByStrategy = new Map<string, number>()
   private readonly lastPositionByStrategy = new Map<string, string>()
+  private readonly transientConnectivityFailures = new Map<string, number>()
   private readonly notices = new Set<string>()
 
   constructor(private readonly store: LocalStore) {}
@@ -234,6 +250,7 @@ export class StrategyExecutionEngine {
       const index = latestClosedCandleIndex(candles, strategy.interval)
       if (index < 60) return
       const candle = candles[index]
+      this.clearTransientConnectivityFailures(strategy.id)
       if (this.lastCandleByStrategy.get(strategy.id) === candle.time) return
 
       const snapshotAfterSync = this.store.snapshot()
@@ -329,6 +346,10 @@ export class StrategyExecutionEngine {
         )
         return
       }
+      if (this.isTransientConnectivityError(message)) {
+        await this.recordTransientConnectivityFailure(strategy, message)
+        return
+      }
       const snapshot = this.store.snapshot()
       if (snapshot.preferences.userSettings.autoPauseOnApiError) {
         await this.tripStrategy(strategy, 'warning', '策略执行异常自动暂停', message)
@@ -345,6 +366,41 @@ export class StrategyExecutionEngine {
     const credentials = this.store.getCredentials(profileId)
     if (!credentials) return undefined
     return { ...credentials, environment }
+  }
+
+  private isTransientConnectivityError(message: string): boolean {
+    const normalized = message.toLowerCase()
+    if (/api key|signature|permission|unauthori[sz]ed|invalid api|timestamp|insufficient|margin/i.test(message)) return false
+    if (message.includes('无法连接 Binance')) return true
+    return transientConnectivityMarkers.some((marker) => normalized.includes(marker.toLowerCase()))
+  }
+
+  private clearTransientConnectivityFailures(strategyId: string): void {
+    this.transientConnectivityFailures.delete(strategyId)
+  }
+
+  private async recordTransientConnectivityFailure(strategy: StrategyConfig, message: string): Promise<void> {
+    const failures = (this.transientConnectivityFailures.get(strategy.id) ?? 0) + 1
+    this.transientConnectivityFailures.set(strategy.id, failures)
+    if (failures === 1) {
+      this.store.addRiskEvent({
+        id: crypto.randomUUID(),
+        time: Date.now(),
+        level: 'warning',
+        strategyId: strategy.id,
+        title: '策略执行网络异常自动重试',
+        message: `${message} 本轮已跳过，策略保持运行，下一轮会自动重试。`,
+      })
+    }
+    if (failures === 1 || failures === 3 || failures % 12 === 0) {
+      this.store.addLog(
+        'strategy',
+        'warn',
+        `策略「${strategy.name}」遇到临时网络/TLS 异常，本轮跳过且不自动暂停；连续失败 ${failures} 次，将在下一轮自动重试：${message}`,
+        strategy.id,
+      )
+      await this.store.save()
+    }
   }
 
   private async placeOpenOrder(
