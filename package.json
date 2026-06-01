@@ -1,7 +1,7 @@
 {
   "name": "binanboot",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Electron + React Binance futures quant trading console",
   "type": "module",
   "main": "out/main/index.js",
