@@ -135,6 +135,7 @@ export function connectBinanceStreams(
     }
 
     if (payload.stream?.includes('@aggTrade')) {
+      if (String(data.s) !== symbol) return
       handlers.onTrade({
         id: parseNumber(data.a),
         symbol: String(data.s),

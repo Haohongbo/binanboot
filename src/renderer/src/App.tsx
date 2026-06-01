@@ -190,15 +190,13 @@ function placeStrategyBefore(strategies: StrategyConfig[], draggedId: string, ta
 }
 
 function App(): ReactElement {
-  const {
-    isBootstrapped,
-    selectedSymbol,
-    selectedInterval,
-    setSelectedSymbol,
-    setSelectedInterval,
-    userSettings,
-    riskEvents,
-  } = useQuantStore()
+  const isBootstrapped = useQuantStore((state) => state.isBootstrapped)
+  const selectedSymbol = useQuantStore((state) => state.selectedSymbol)
+  const selectedInterval = useQuantStore((state) => state.selectedInterval)
+  const setSelectedSymbol = useQuantStore((state) => state.setSelectedSymbol)
+  const setSelectedInterval = useQuantStore((state) => state.setSelectedInterval)
+  const userSettings = useQuantStore((state) => state.userSettings)
+  const riskEvents = useQuantStore((state) => state.riskEvents)
   useAppStateSync()
   usePreferencePersistence()
   useMarketStream()
@@ -282,7 +280,10 @@ function App(): ReactElement {
 }
 
 function Sidebar(): ReactElement {
-  const { activePage, setActivePage, systemTime, marketStatus } = useQuantStore()
+  const activePage = useQuantStore((state) => state.activePage)
+  const setActivePage = useQuantStore((state) => state.setActivePage)
+  const systemTime = useQuantStore((state) => state.systemTime)
+  const marketStatus = useQuantStore((state) => state.marketStatus)
   const [expandedNav, setExpandedNav] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') return { strategies: true }
     try {
@@ -364,7 +365,13 @@ function Sidebar(): ReactElement {
 }
 
 function TopBar({ onSelectSymbol }: { onSelectSymbol: (symbol: string) => void }): ReactElement {
-  const { topTickers, watchlist, selectedSymbol, riskEvents, setActivePage, addWatchlistSymbol, removeWatchlistSymbol } = useQuantStore()
+  const topTickers = useQuantStore((state) => state.topTickers)
+  const watchlist = useQuantStore((state) => state.watchlist)
+  const selectedSymbol = useQuantStore((state) => state.selectedSymbol)
+  const riskEvents = useQuantStore((state) => state.riskEvents)
+  const setActivePage = useQuantStore((state) => state.setActivePage)
+  const addWatchlistSymbol = useQuantStore((state) => state.addWatchlistSymbol)
+  const removeWatchlistSymbol = useQuantStore((state) => state.removeWatchlistSymbol)
   const [isAddingSymbol, setIsAddingSymbol] = useState(false)
   const [symbolDraft, setSymbolDraft] = useState('')
   const [symbolError, setSymbolError] = useState('')
@@ -542,7 +549,11 @@ function Toolbar({
   onToggleIndicators: () => void
   onToggleDrawing: () => void
 }): ReactElement {
-  const { liveMode, setLiveMode, marketStatus, currentMarket, watchlist } = useQuantStore()
+  const liveMode = useQuantStore((state) => state.liveMode)
+  const setLiveMode = useQuantStore((state) => state.setLiveMode)
+  const marketStatus = useQuantStore((state) => state.marketStatus)
+  const currentMarket = useQuantStore((state) => state.currentMarket)
+  const watchlist = useQuantStore((state) => state.watchlist)
   const bestBid = currentMarket?.bids[0]?.price
   const bestAsk = currentMarket?.asks[0]?.price
   const midPrice = bestBid && bestAsk ? (bestBid + bestAsk) / 2 : undefined
@@ -773,7 +784,12 @@ function RecentTradesPanel(): ReactElement {
 }
 
 function StrategyRunPanel(): ReactElement {
-  const { strategies, setStrategies, liveMode, apiProfiles, strategyPositions, setActivePage } = useQuantStore()
+  const strategies = useQuantStore((state) => state.strategies)
+  const setStrategies = useQuantStore((state) => state.setStrategies)
+  const liveMode = useQuantStore((state) => state.liveMode)
+  const apiProfiles = useQuantStore((state) => state.apiProfiles)
+  const strategyPositions = useQuantStore((state) => state.strategyPositions)
+  const setActivePage = useQuantStore((state) => state.setActivePage)
   const [updatingStrategyId, setUpdatingStrategyId] = useState('')
   const [draggedStrategyId, setDraggedStrategyId] = useState('')
   const [dragOverStrategyId, setDragOverStrategyId] = useState('')
@@ -1146,7 +1162,10 @@ function KpiStrip({ items }: { items: Array<{ label: string; value: string; delt
 }
 
 function StrategiesPage(): ReactElement {
-  const { strategies, setStrategies, selectedSymbol, strategyPositions } = useQuantStore()
+  const strategies = useQuantStore((state) => state.strategies)
+  const setStrategies = useQuantStore((state) => state.setStrategies)
+  const selectedSymbol = useQuantStore((state) => state.selectedSymbol)
+  const strategyPositions = useQuantStore((state) => state.strategyPositions)
   const [editingStrategyId, setEditingStrategyId] = useState('')
   const [draggedStrategyId, setDraggedStrategyId] = useState('')
   const [dragOverStrategyId, setDragOverStrategyId] = useState('')
@@ -1496,7 +1515,12 @@ function StrategiesPage(): ReactElement {
 }
 
 function StrategyDiagnosticsPage(): ReactElement {
-  const { strategies, logs, orders, strategyPositions, setActivePage, setLogs } = useQuantStore()
+  const strategies = useQuantStore((state) => state.strategies)
+  const logs = useQuantStore((state) => state.logs)
+  const orders = useQuantStore((state) => state.orders)
+  const strategyPositions = useQuantStore((state) => state.strategyPositions)
+  const setActivePage = useQuantStore((state) => state.setActivePage)
+  const setLogs = useQuantStore((state) => state.setLogs)
   const runningStrategies = useMemo(
     () => strategies.filter((strategy) => strategy.status === 'running' || strategy.status === 'tripped'),
     [strategies],
@@ -1651,17 +1675,15 @@ function StrategyDiagnosticsPage(): ReactElement {
 }
 
 function BacktestPage(): ReactElement {
-  const {
-    backtestParams,
-    setBacktestParams,
-    backtestResult,
-    setBacktestResult,
-    backtestRunStatus,
-    backtestRunError,
-    backtestStartedAt,
-    setBacktestRunMeta,
-    strategies,
-  } = useQuantStore()
+  const backtestParams = useQuantStore((state) => state.backtestParams)
+  const setBacktestParams = useQuantStore((state) => state.setBacktestParams)
+  const backtestResult = useQuantStore((state) => state.backtestResult)
+  const setBacktestResult = useQuantStore((state) => state.setBacktestResult)
+  const backtestRunStatus = useQuantStore((state) => state.backtestRunStatus)
+  const backtestRunError = useQuantStore((state) => state.backtestRunError)
+  const backtestStartedAt = useQuantStore((state) => state.backtestStartedAt)
+  const setBacktestRunMeta = useQuantStore((state) => state.setBacktestRunMeta)
+  const strategies = useQuantStore((state) => state.strategies)
   const [caching, setCaching] = useState(false)
   const [cacheStatus, setCacheStatus] = useState('')
   const [error, setError] = useState('')
@@ -1965,7 +1987,13 @@ function BacktestMetrics(): ReactElement {
 }
 
 function OrdersPage(): ReactElement {
-  const { apiProfiles, selectedSymbol, currentMarket, addOrder, orders, liveMode, strategies } = useQuantStore()
+  const apiProfiles = useQuantStore((state) => state.apiProfiles)
+  const selectedSymbol = useQuantStore((state) => state.selectedSymbol)
+  const currentMarket = useQuantStore((state) => state.currentMarket)
+  const addOrder = useQuantStore((state) => state.addOrder)
+  const orders = useQuantStore((state) => state.orders)
+  const liveMode = useQuantStore((state) => state.liveMode)
+  const strategies = useQuantStore((state) => state.strategies)
   const defaultLiveProfileId = useMemo(() => {
     const liveProfiles = apiProfiles.filter((profile) => profile.environment === 'live')
     return (
@@ -2147,7 +2175,12 @@ function OrdersPage(): ReactElement {
 }
 
 function RiskPage(): ReactElement {
-  const { riskRules, setRiskRules, riskEvents, addRiskEvent, strategies, setStrategies } = useQuantStore()
+  const riskRules = useQuantStore((state) => state.riskRules)
+  const setRiskRules = useQuantStore((state) => state.setRiskRules)
+  const riskEvents = useQuantStore((state) => state.riskEvents)
+  const addRiskEvent = useQuantStore((state) => state.addRiskEvent)
+  const strategies = useQuantStore((state) => state.strategies)
+  const setStrategies = useQuantStore((state) => state.setStrategies)
   const [draft, setDraft] = useState(riskRules)
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
@@ -2248,14 +2281,12 @@ function RiskPage(): ReactElement {
 }
 
 function AssetsPage(): ReactElement {
-  const {
-    assets,
-    apiProfiles,
-    accountSyncStatus,
-    accountLastSyncedAt,
-    accountSyncError,
-    setAccountSyncMeta,
-  } = useQuantStore()
+  const assets = useQuantStore((state) => state.assets)
+  const apiProfiles = useQuantStore((state) => state.apiProfiles)
+  const accountSyncStatus = useQuantStore((state) => state.accountSyncStatus)
+  const accountLastSyncedAt = useQuantStore((state) => state.accountLastSyncedAt)
+  const accountSyncError = useQuantStore((state) => state.accountSyncError)
+  const setAccountSyncMeta = useQuantStore((state) => state.setAccountSyncMeta)
   const profileOptions = useMemo(() => apiProfiles.filter((profile) => profile.status === 'connected' || profile.canRead), [apiProfiles])
   const [profileId, setProfileId] = useState('')
   const isSyncingRef = useRef(false)
@@ -2351,7 +2382,8 @@ function AssetsPage(): ReactElement {
 }
 
 function LogsPage(): ReactElement {
-  const { logs, setLogs } = useQuantStore()
+  const logs = useQuantStore((state) => state.logs)
+  const setLogs = useQuantStore((state) => state.setLogs)
 
   async function clearLogs(): Promise<void> {
     if (logs.length === 0) return
@@ -2404,7 +2436,8 @@ function updatePhaseText(phase: AppUpdateState['phase']): string {
 }
 
 function SettingsPage(): ReactElement {
-  const { userSettings, setUserSettings } = useQuantStore()
+  const userSettings = useQuantStore((state) => state.userSettings)
+  const setUserSettings = useQuantStore((state) => state.setUserSettings)
   const [updateState, setUpdateState] = useState<AppUpdateState | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
 
@@ -2644,19 +2677,21 @@ function EmptyRow({ text }: { text: string }): ReactElement {
 function dateInputValue(value: number): string {
   const date = new Date(value)
   if (!Number.isFinite(value) || Number.isNaN(date.getTime())) {
-    return new Date().toISOString().slice(0, 10)
+    return dateInputValue(Date.now())
   }
-  const year = date.getUTCFullYear()
+  const year = date.getFullYear()
   if (year < 1000 || year > 9999) {
-    return new Date().toISOString().slice(0, 10)
+    return dateInputValue(Date.now())
   }
-  return date.toISOString().slice(0, 10)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function parseDateInputValue(value: string, fallback: number): number {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (!match) return fallback
-  const parsed = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).getTime()
   return Number.isFinite(parsed) ? parsed : fallback
 }
 

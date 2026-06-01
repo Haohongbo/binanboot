@@ -352,6 +352,8 @@ function normalizeStrategies(strategies?: StrategyConfig[]): StrategyConfig[] {
 export class LocalStore {
   private state: PersistedState = defaultState
   private db: DatabaseSync | null = null
+  private saveStateStatement: any = null
+  private savePreferencesStatement: any = null
   private feishuTenantAccessToken = ''
   private feishuTenantTokenExpiresAt = 0
   private readonly listeners = new Set<(patch: AppStatePatch) => void>()
@@ -373,7 +375,8 @@ export class LocalStore {
     }
   }
 
-  async load(): Promise<void> {
+  private async ensureDb(): Promise<DatabaseSync> {
+    if (this.db) return this.db
     const file = sqliteFilePath()
     await mkdir(dirname(file), { recursive: true })
     this.db = new DatabaseSync(file)
@@ -389,8 +392,29 @@ export class LocalStore {
         updated_at integer not null
       );
     `)
+    this.saveStateStatement = null
+    this.savePreferencesStatement = null
+    return this.db
+  }
 
-    const stored = this.db.prepare('select value from kv_store where key = ?').get('app_state') as { value?: string } | undefined
+  private saveStatements(): { state: any; preferences: any } {
+    if (!this.db) throw new Error('SQLite store is not initialized')
+    this.saveStateStatement ??= this.db.prepare(
+      `insert into kv_store (key, value, updated_at)
+       values (?, ?, ?)
+       on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at`,
+    )
+    this.savePreferencesStatement ??= this.db.prepare(
+      `insert into app_settings (key, value, updated_at)
+       values (?, ?, ?)
+       on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at`,
+    )
+    return { state: this.saveStateStatement, preferences: this.savePreferencesStatement }
+  }
+
+  async load(): Promise<void> {
+    const db = await this.ensureDb()
+    const stored = db.prepare('select value from kv_store where key = ?').get('app_state') as { value?: string } | undefined
     if (stored?.value) {
       this.hydrate(JSON.parse(stored.value) as PersistedState)
       return
@@ -419,38 +443,11 @@ export class LocalStore {
   }
 
   async save(): Promise<void> {
-    if (!this.db) {
-      const file = sqliteFilePath()
-      await mkdir(dirname(file), { recursive: true })
-      this.db = new DatabaseSync(file)
-      this.db.exec(`
-        create table if not exists kv_store (
-          key text primary key,
-          value text not null,
-          updated_at integer not null
-        );
-        create table if not exists app_settings (
-          key text primary key,
-          value text not null,
-          updated_at integer not null
-        );
-      `)
-    }
+    await this.ensureDb()
     const now = Date.now()
-    this.db
-      .prepare(
-        `insert into kv_store (key, value, updated_at)
-         values (?, ?, ?)
-         on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at`,
-      )
-      .run('app_state', JSON.stringify(this.state), now)
-    this.db
-      .prepare(
-        `insert into app_settings (key, value, updated_at)
-         values (?, ?, ?)
-         on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at`,
-      )
-      .run('preferences', JSON.stringify(this.state.preferences), now)
+    const statements = this.saveStatements()
+    statements.state.run('app_state', JSON.stringify(this.state), now)
+    statements.preferences.run('preferences', JSON.stringify(this.state.preferences), now)
   }
 
   snapshot(): AppStateSnapshot {

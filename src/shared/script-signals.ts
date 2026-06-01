@@ -83,6 +83,87 @@ export type SignalPositionState = {
   lowestSinceEntry?: number
 }
 
+export type CompiledScriptExpression = (context: SignalContext) => number | boolean
+
+export type CompiledScriptRules = {
+  buy: CompiledScriptExpression
+  sell: CompiledScriptExpression
+  long: CompiledScriptExpression
+  closeLong: CompiledScriptExpression
+  short: CompiledScriptExpression
+  closeShort: CompiledScriptExpression
+  position: CompiledScriptExpression
+}
+
+const signalContextNames: Array<keyof SignalContext> = [
+  'open',
+  'high',
+  'low',
+  'close',
+  'volume',
+  'maFast',
+  'maSlow',
+  'ma20',
+  'ma60',
+  'ma120',
+  'maFastSlope',
+  'maSlowSlope',
+  'momentum',
+  'momentum3',
+  'momentum5',
+  'momentum12',
+  'momentum20',
+  'channelHigh',
+  'channelLow',
+  'channelMid',
+  'channelWidth',
+  'volatility',
+  'volumeRatio',
+  'rsi14',
+  'macd',
+  'macdSignal',
+  'macdHist',
+  'atr14',
+  'atrPct',
+  'trueRangePct',
+  'bbUpper',
+  'bbMiddle',
+  'bbLower',
+  'bbWidth',
+  'bbPctB',
+  'bodyPct',
+  'upperShadowPct',
+  'lowerShadowPct',
+  'rangePct',
+  'candleReturn',
+  'closeLocation',
+  'entryPrice',
+  'position',
+  'signedPosition',
+  'positionSide',
+  'barsHeld',
+  'unrealizedPnlPct',
+  'highestSinceEntry',
+  'lowestSinceEntry',
+  'drawdownSinceEntry',
+  'factorScore',
+  'htfMaFast',
+  'htfMaSlow',
+  'htfMa20',
+  'htfMa60',
+  'htfMomentum5',
+  'htfMomentum20',
+  'htfRsi14',
+  'htfVolumeRatio',
+  'htfBbPctB',
+  'htfAtrPct',
+  'htfTrendScore',
+]
+
+const signalContextNameSet = new Set<string>(signalContextNames)
+const scriptLiterals = new Set(['true', 'false'])
+const compiledExpressionCache = new Map<string, CompiledScriptExpression>()
+
 export function parseScriptRules(script: string | undefined, defaults: ScriptRules): ScriptRules {
   if (!script?.trim()) return defaults
   return script.split(/\r?\n/).reduce((rules, line) => {
@@ -108,20 +189,38 @@ export function parseScriptRules(script: string | undefined, defaults: ScriptRul
   }, defaults)
 }
 
-export function evalScriptExpression(expression: string, context: SignalContext): number | boolean {
+export function compileScriptExpression(expression: string): CompiledScriptExpression {
+  const cached = compiledExpressionCache.get(expression)
+  if (cached) return cached
   const allowed = /^[\d\s()+\-*/%.<>=!&|?:_a-zA-Z]+$/
   if (!allowed.test(expression) || /(?:constructor|prototype|global|process|require|import|Function|eval|window|document|\[|\]|;|,|`|'|")/.test(expression)) {
     throw new Error(`自定义策略表达式包含不支持的字符或关键字：${expression}`)
   }
-  const names = Object.keys(context)
-  const literals = new Set(['true', 'false'])
   if (!expression.match(/^[\d\s()+\-*/%.<>=!&|?:]+$/)) {
     const tokens = expression.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) ?? []
-    const unknown = tokens.find((token) => !names.includes(token) && !literals.has(token))
+    const unknown = tokens.find((token) => !signalContextNameSet.has(token) && !scriptLiterals.has(token))
     if (unknown) throw new Error(`自定义策略使用了未知变量：${unknown}`)
   }
-  const values = names.map((name) => context[name as keyof SignalContext])
-  return Function(...names, `"use strict"; return (${expression});`)(...values) as number | boolean
+  const destructuredNames = signalContextNames.join(', ')
+  const evaluator = Function('context', `"use strict"; const { ${destructuredNames} } = context; return (${expression});`) as CompiledScriptExpression
+  compiledExpressionCache.set(expression, evaluator)
+  return evaluator
+}
+
+export function compileScriptRules(rules: ScriptRules): CompiledScriptRules {
+  return {
+    buy: compileScriptExpression(rules.buy),
+    sell: compileScriptExpression(rules.sell),
+    long: compileScriptExpression(rules.long),
+    closeLong: compileScriptExpression(rules.closeLong),
+    short: compileScriptExpression(rules.short),
+    closeShort: compileScriptExpression(rules.closeShort),
+    position: compileScriptExpression(rules.position),
+  }
+}
+
+export function evalScriptExpression(expression: string, context: SignalContext): number | boolean {
+  return compileScriptExpression(expression)(context)
 }
 
 export function averageClose(candles: Candle[]): number {
@@ -164,6 +263,80 @@ function emaSeries(values: number[], period: number): number[] {
     result.push(index === 0 ? values[index] : values[index] * multiplier + result[index - 1] * (1 - multiplier))
   }
   return result
+}
+
+function pushMaxIndex(deque: number[], values: number[], index: number): void {
+  while (deque.length > 0 && values[deque[deque.length - 1]] <= values[index]) deque.pop()
+  deque.push(index)
+}
+
+function pushMinIndex(deque: number[], values: number[], index: number): void {
+  while (deque.length > 0 && values[deque[deque.length - 1]] >= values[index]) deque.pop()
+  deque.push(index)
+}
+
+function expireBefore(deque: number[], minIndex: number): void {
+  while (deque.length > 0 && deque[0] < minIndex) deque.shift()
+}
+
+function rollingCoreIndicators(candles: Candle[], closes: number[]): Pick<SignalSeries, 'trueRange' | 'rsi14' | 'atr14' | 'bbUpper' | 'bbMiddle' | 'bbLower'> {
+  const trueRange: number[] = []
+  const rsi14: number[] = []
+  const atr14: number[] = []
+  const bbUpper: number[] = []
+  const bbMiddle: number[] = []
+  const bbLower: number[] = []
+  const gainsByIndex: number[] = []
+  const lossesByIndex: number[] = []
+  let gainSum = 0
+  let lossSum = 0
+  let atrSum = 0
+  let bbSum = 0
+  let bbSumSquares = 0
+
+  for (let index = 0; index < candles.length; index += 1) {
+    const candle = candles[index]
+    const previousClose = candles[index - 1]?.close ?? candle.close
+    const range = Math.max(candle.high - candle.low, Math.abs(candle.high - previousClose), Math.abs(candle.low - previousClose))
+    trueRange.push(range)
+
+    atrSum += range
+    if (index >= 14) atrSum -= trueRange[index - 14]
+    atr14.push(atrSum / Math.min(index + 1, 14))
+
+    if (index > 0) {
+      const delta = candle.close - candles[index - 1].close
+      const gain = delta >= 0 ? delta : 0
+      const loss = delta < 0 ? Math.abs(delta) : 0
+      gainsByIndex[index] = gain
+      lossesByIndex[index] = loss
+      gainSum += gain
+      lossSum += loss
+      if (index > 14) {
+        gainSum -= gainsByIndex[index - 14] ?? 0
+        lossSum -= lossesByIndex[index - 14] ?? 0
+      }
+    }
+    rsi14.push(index < 14 ? 50 : lossSum === 0 ? 100 : 100 - 100 / (1 + gainSum / lossSum))
+
+    const close = closes[index]
+    bbSum += close
+    bbSumSquares += close * close
+    if (index >= 20) {
+      const stale = closes[index - 20]
+      bbSum -= stale
+      bbSumSquares -= stale * stale
+    }
+    const bbCount = Math.min(index + 1, 20)
+    const middle = bbSum / bbCount
+    const variance = Math.max(0, bbSumSquares / bbCount - middle * middle)
+    const deviation = Math.sqrt(variance)
+    bbMiddle.push(middle)
+    bbUpper.push(middle + 2 * deviation)
+    bbLower.push(middle - 2 * deviation)
+  }
+
+  return { trueRange, rsi14, atr14, bbUpper, bbMiddle, bbLower }
 }
 
 function inferIntervalMs(candles: Candle[], fallback = 300_000): number {
@@ -245,58 +418,53 @@ function getSignalSeries(candles: Candle[]): SignalSeries {
   const ma20 = rollingAverage(closes, 20)
   const ma60 = rollingAverage(closes, 60)
   const ma120 = rollingAverage(closes, 120)
-  const trueRange: number[] = []
   const channelHigh: number[] = []
   const channelLow: number[] = []
   const channelMid: number[] = []
   const volatility: number[] = []
-  const rsi14: number[] = []
-  const atr14: number[] = []
-  const bbUpper: number[] = []
-  const bbMiddle: number[] = []
-  const bbLower: number[] = []
+  const highs = candles.map((candle) => candle.high)
+  const lows = candles.map((candle) => candle.low)
+  const core = rollingCoreIndicators(candles, closes)
+  const highDeque: number[] = []
+  const lowDeque: number[] = []
+  const returnIndexQueue: number[] = []
+  const returnsByIndex: number[] = []
+  let channelCloseSum = 0
+  let returnSum = 0
+  let returnSumSquares = 0
 
   for (let index = 0; index < candles.length; index += 1) {
     const candle = candles[index]
-    const previousClose = candles[index - 1]?.close ?? candle.close
-    trueRange.push(Math.max(candle.high - candle.low, Math.abs(candle.high - previousClose), Math.abs(candle.low - previousClose)))
+    expireBefore(highDeque, index - 20)
+    expireBefore(lowDeque, index - 20)
+    const channelCount = Math.min(index, 20)
+    channelHigh.push(channelCount > 0 ? highs[highDeque[0]] : candle.high)
+    channelLow.push(channelCount > 0 ? lows[lowDeque[0]] : candle.low)
+    channelMid.push(channelCount > 0 ? channelCloseSum / channelCount : candle.close)
 
-    const channelWindow = candles.slice(Math.max(0, index - 20), index)
-    channelHigh.push(channelWindow.length > 0 ? highestHigh(channelWindow) : candle.high)
-    channelLow.push(channelWindow.length > 0 ? lowestLow(channelWindow) : candle.low)
-    channelMid.push(channelWindow.length > 0 ? averageClose(channelWindow) : candle.close)
-
-    const factorFrom = Math.max(0, index - 30)
-    const returns: number[] = []
-    for (let itemIndex = Math.max(1, factorFrom); itemIndex <= index; itemIndex += 1) {
-      const base = candles[itemIndex - 1].close
-      returns.push(base > 0 ? candles[itemIndex].close / base - 1 : 0)
+    if (index > 0) {
+      const base = candles[index - 1].close
+      const nextReturn = base > 0 ? candle.close / base - 1 : 0
+      returnsByIndex[index] = nextReturn
+      returnIndexQueue.push(index)
+      returnSum += nextReturn
+      returnSumSquares += nextReturn * nextReturn
     }
-    const avgReturn = returns.reduce((sum, item) => sum + item, 0) / Math.max(1, returns.length)
-    const variance = returns.reduce((sum, item) => sum + Math.pow(item - avgReturn, 2), 0) / Math.max(1, returns.length)
+    while (returnIndexQueue.length > 0 && returnIndexQueue[0] < Math.max(1, index - 30)) {
+      const staleIndex = returnIndexQueue.shift()!
+      const stale = returnsByIndex[staleIndex] ?? 0
+      returnSum -= stale
+      returnSumSquares -= stale * stale
+    }
+    const returnCount = Math.max(1, returnIndexQueue.length)
+    const avgReturn = returnSum / returnCount
+    const variance = Math.max(0, returnSumSquares / returnCount - avgReturn * avgReturn)
     volatility.push(Math.sqrt(variance))
 
-    let gains = 0
-    let losses = 0
-    for (let itemIndex = Math.max(1, index - 13); itemIndex <= index; itemIndex += 1) {
-      const delta = candles[itemIndex].close - candles[itemIndex - 1].close
-      if (delta >= 0) gains += delta
-      else losses += Math.abs(delta)
-    }
-    rsi14.push(index < 14 ? 50 : losses === 0 ? 100 : 100 - 100 / (1 + gains / losses))
-
-    const atrFrom = Math.max(0, index - 13)
-    const atrSum = trueRange.slice(atrFrom, index + 1).reduce((sum, item) => sum + item, 0)
-    atr14.push(atrSum / Math.max(1, index - atrFrom + 1))
-
-    const bbFrom = Math.max(0, index - 19)
-    const bbCloses = closes.slice(bbFrom, index + 1)
-    const middle = bbCloses.reduce((sum, item) => sum + item, 0) / Math.max(1, bbCloses.length)
-    const bbVariance = bbCloses.reduce((sum, item) => sum + Math.pow(item - middle, 2), 0) / Math.max(1, bbCloses.length)
-    const deviation = Math.sqrt(bbVariance)
-    bbMiddle.push(middle)
-    bbUpper.push(middle + 2 * deviation)
-    bbLower.push(middle - 2 * deviation)
+    pushMaxIndex(highDeque, highs, index)
+    pushMinIndex(lowDeque, lows, index)
+    channelCloseSum += candle.close
+    if (index >= 20) channelCloseSum -= candles[index - 20].close
   }
 
   const volumeBase = rollingAverage(volumes, 31)
@@ -319,15 +487,15 @@ function getSignalSeries(candles: Candle[]): SignalSeries {
     channelMid,
     volatility,
     volumeRatio,
-    rsi14,
+    rsi14: core.rsi14,
     macd,
     macdSignal,
     macdHist,
-    atr14,
-    trueRange,
-    bbUpper,
-    bbMiddle,
-    bbLower,
+    atr14: core.atr14,
+    trueRange: core.trueRange,
+    bbUpper: core.bbUpper,
+    bbMiddle: core.bbMiddle,
+    bbLower: core.bbLower,
   }
   signalSeriesCache.set(candles, series)
   return series
@@ -363,40 +531,7 @@ function getHigherTimeframeSeries(candles: Candle[]): HigherTimeframeSeries {
   const maSlow = rollingAverage(closes, 14)
   const ma20 = rollingAverage(closes, 20)
   const ma60 = rollingAverage(closes, 60)
-  const trueRange: number[] = []
-  const rsi14: number[] = []
-  const atr14: number[] = []
-  const bbUpper: number[] = []
-  const bbMiddle: number[] = []
-  const bbLower: number[] = []
-
-  for (let index = 0; index < resampledCandles.length; index += 1) {
-    const candle = resampledCandles[index]
-    const previousClose = resampledCandles[index - 1]?.close ?? candle.close
-    trueRange.push(Math.max(candle.high - candle.low, Math.abs(candle.high - previousClose), Math.abs(candle.low - previousClose)))
-
-    let gains = 0
-    let losses = 0
-    for (let itemIndex = Math.max(1, index - 13); itemIndex <= index; itemIndex += 1) {
-      const delta = resampledCandles[itemIndex].close - resampledCandles[itemIndex - 1].close
-      if (delta >= 0) gains += delta
-      else losses += Math.abs(delta)
-    }
-    rsi14.push(index < 14 ? 50 : losses === 0 ? 100 : 100 - 100 / (1 + gains / losses))
-
-    const atrFrom = Math.max(0, index - 13)
-    const atrSum = trueRange.slice(atrFrom, index + 1).reduce((sum, item) => sum + item, 0)
-    atr14.push(atrSum / Math.max(1, index - atrFrom + 1))
-
-    const bbFrom = Math.max(0, index - 19)
-    const bbCloses = closes.slice(bbFrom, index + 1)
-    const middle = bbCloses.reduce((sum, item) => sum + item, 0) / Math.max(1, bbCloses.length)
-    const bbVariance = bbCloses.reduce((sum, item) => sum + Math.pow(item - middle, 2), 0) / Math.max(1, bbCloses.length)
-    const deviation = Math.sqrt(bbVariance)
-    bbMiddle.push(middle)
-    bbUpper.push(middle + 2 * deviation)
-    bbLower.push(middle - 2 * deviation)
-  }
+  const core = rollingCoreIndicators(resampledCandles, closes)
 
   const volumeBase = rollingAverage(volumes, 31)
   const volumeRatio = volumes.map((volume, index) => (volumeBase[index] > 0 ? volume / volumeBase[index] : 1))
@@ -404,14 +539,14 @@ function getHigherTimeframeSeries(candles: Candle[]): HigherTimeframeSeries {
   const momentum20 = closes.map((_, index) => momentumAt(resampledCandles, index, 20))
 
   const htfTrendScore = closes.map((close, index) => {
-    const bandRange = bbUpper[index] - bbLower[index]
+    const bandRange = core.bbUpper[index] - core.bbLower[index]
     return (
       (maFast[index] > maSlow[index] ? 1 : -1) +
       (momentum5[index] > 0.018 ? 0.7 : momentum5[index] < -0.018 ? -0.7 : 0) +
       (momentum20[index] > 0.01 ? 0.45 : momentum20[index] < -0.01 ? -0.45 : 0) +
-      (rsi14[index] > 58 ? 0.35 : rsi14[index] < 42 ? -0.35 : 0) +
+      (core.rsi14[index] > 58 ? 0.35 : core.rsi14[index] < 42 ? -0.35 : 0) +
       (volumeRatio[index] > 1.05 ? 0.2 : 0) +
-      (bandRange > 0 ? ((close - bbMiddle[index]) / bandRange > 0.55 ? 0.1 : -0.1) : 0)
+      (bandRange > 0 ? ((close - core.bbMiddle[index]) / bandRange > 0.55 ? 0.1 : -0.1) : 0)
     )
   })
 
@@ -432,14 +567,14 @@ function getHigherTimeframeSeries(candles: Candle[]): HigherTimeframeSeries {
     ma60: availableIndex.map((index) => (index >= 0 ? ma60[index] : 0)),
     momentum5: availableIndex.map((index) => (index >= 0 ? momentum5[index] : 0)),
     momentum20: availableIndex.map((index) => (index >= 0 ? momentum20[index] : 0)),
-    rsi14: availableIndex.map((index) => (index >= 0 ? rsi14[index] : 50)),
+    rsi14: availableIndex.map((index) => (index >= 0 ? core.rsi14[index] : 50)),
     volumeRatio: availableIndex.map((index) => (index >= 0 ? volumeRatio[index] : 1)),
     bbPctB: availableIndex.map((index) => {
       if (index < 0) return 0.5
-      const bandRange = bbUpper[index] - bbLower[index]
-      return bandRange > 0 ? (closes[index] - bbLower[index]) / bandRange : 0.5
+      const bandRange = core.bbUpper[index] - core.bbLower[index]
+      return bandRange > 0 ? (closes[index] - core.bbLower[index]) / bandRange : 0.5
     }),
-    atrPct: availableIndex.map((index) => (index >= 0 ? (closes[index] > 0 ? atr14[index] / closes[index] : 0) : 0)),
+    atrPct: availableIndex.map((index) => (index >= 0 ? (closes[index] > 0 ? core.atr14[index] / closes[index] : 0) : 0)),
     trendScore: availableIndex.map((index) => (index >= 0 ? htfTrendScore[index] : 0)),
   }
   higherTimeframeSeriesCache.set(candles, series)

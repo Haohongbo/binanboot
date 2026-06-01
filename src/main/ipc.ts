@@ -29,7 +29,7 @@ import type {
 } from '../shared/types'
 import {
   buildSignalContext,
-  evalScriptExpression,
+  compileScriptRules,
   lowestLow,
   parseScriptRules,
 } from '../shared/script-signals'
@@ -112,6 +112,11 @@ function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
+function markToMarketEquity(cash: number, position: number, entryPrice: number, close: number, feeRate: number): number {
+  if (position === 0) return cash
+  return cash + position * (close - entryPrice) - Math.abs(position) * close * feeRate
+}
+
 async function runNaiveBacktest(
   params: BacktestParams,
   candles: Candle[],
@@ -138,7 +143,6 @@ async function runNaiveBacktest(
   let grossLoss = 0
   let peak = params.initialCapital
   let maxDrawdown = 0
-  let lastRequestedCandle: Candle | undefined
   let entryIndex = -1
   const scriptRules = params.strategyType === 'script'
     ? parseScriptRules(customStrategy?.customScript, {
@@ -151,19 +155,19 @@ async function runNaiveBacktest(
         position: '0.25',
       })
     : undefined
+  const compiledScriptRules = scriptRules ? compileScriptRules(scriptRules) : undefined
   const effectiveLeverage = Math.max(1, Math.min(125, Math.floor(Number.isFinite(leverageInfo.value) ? leverageInfo.value : 1)))
 
   const yieldEvery = 2048
   for (let index = startIndex; index <= endIndex; index += 1) {
     const candle = candles[index]
-    lastRequestedCandle = candle
 
     if (index > startIndex && (index - startIndex) % yieldEvery === 0) {
       await yieldToEventLoop()
     }
 
     if (index < slowPeriod - 1) {
-      equityCurve.push({ time: candle.time, value: cash + (position !== 0 ? position * (candle.close - entryPrice) : 0) })
+      equityCurve.push({ time: candle.time, value: markToMarketEquity(cash, position, entryPrice, candle.close, params.feeRate) })
       continue
     }
 
@@ -211,18 +215,15 @@ async function runNaiveBacktest(
       shouldExit = position > 0 && (factorScore <= 0.25 || candle.close < trailingStop || candle.close < entryPrice * 0.94)
       positionRatio = 0.3
     } else if (params.strategyType === 'script') {
-      const parsedPosition = Number(evalScriptExpression(scriptRules?.position ?? '0.25', context))
-      const longRule = scriptRules?.long ?? scriptRules?.buy ?? 'false'
-      const closeLongRule = scriptRules?.closeLong ?? scriptRules?.sell ?? 'false'
-      const shortRule = scriptRules?.short ?? 'false'
-      const closeShortRule = scriptRules?.closeShort ?? 'false'
-      const shouldLong = Boolean(evalScriptExpression(longRule, context))
-      const shouldShort = Boolean(evalScriptExpression(shortRule, context))
+      if (!compiledScriptRules) throw new Error('自定义脚本规则未完成编译')
+      const parsedPosition = Number(compiledScriptRules.position(context))
+      const shouldLong = Boolean(compiledScriptRules.long(context))
+      const shouldShort = Boolean(compiledScriptRules.short(context))
       shouldEnter = position === 0 && (shouldLong || shouldShort)
       shouldExit = position > 0
-        ? Boolean(evalScriptExpression(closeLongRule, context))
+        ? Boolean(compiledScriptRules.closeLong(context))
         : position < 0
-          ? Boolean(evalScriptExpression(closeShortRule, context))
+          ? Boolean(compiledScriptRules.closeShort(context))
           : false
       positionRatio = Math.min(0.8, Math.max(0.01, Number.isFinite(parsedPosition) ? parsedPosition : 0.25))
       if (shouldEnter && shouldShort && !shouldLong) positionRatio *= -1
@@ -288,43 +289,10 @@ async function runNaiveBacktest(
       entryIndex = -1
     }
 
-    const equity = cash + (position !== 0 ? position * (candle.close - entryPrice) : 0)
+    const equity = markToMarketEquity(cash, position, entryPrice, candle.close, params.feeRate)
     peak = Math.max(peak, equity)
     maxDrawdown = Math.max(maxDrawdown, (peak - equity) / peak)
     equityCurve.push({ time: candle.time, value: equity })
-  }
-
-  if (position !== 0 && lastRequestedCandle) {
-    const quantity = Math.abs(position)
-    const fee = quantity * lastRequestedCandle.close * params.feeRate
-    const pnl = position * (lastRequestedCandle.close - entryPrice) - fee
-    cash += pnl
-    if (pnl > 0) {
-      wins += 1
-      grossProfit += pnl
-    } else {
-      grossLoss += Math.abs(pnl)
-    }
-    closedTrades += 1
-    trades.push({
-      time: lastRequestedCandle.time,
-      symbol: params.symbol,
-      side: position < 0 ? 'BUY' : 'SELL',
-      positionSide: position < 0 ? 'SHORT' : 'LONG',
-      price: lastRequestedCandle.close,
-      quantity,
-      pnl,
-    })
-    position = 0
-    entryPrice = 0
-    highestSinceEntry = 0
-    lowestSinceEntry = 0
-    entryIndex = -1
-    if (equityCurve.length > 0) {
-      equityCurve[equityCurve.length - 1] = { time: lastRequestedCandle.time, value: cash }
-      peak = Math.max(peak, cash)
-      maxDrawdown = Math.max(maxDrawdown, (peak - cash) / peak)
-    }
   }
 
   const finalEquity = equityCurve[equityCurve.length - 1]?.value ?? params.initialCapital

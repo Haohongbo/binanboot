@@ -96,23 +96,37 @@ export class AnalyticsStore {
             metrics: JSON.stringify(result.metrics),
           },
         )
-        for (const point of result.equityCurve) {
-          await this.connection.run('insert into backtest_equity_curve values ($runId, $time, $value)', {
-            runId,
-            time: point.time,
-            value: point.value,
-          })
+        const equityInsert = await this.connection.prepare('insert into backtest_equity_curve values ($runId, $time, $value)')
+        try {
+          for (const point of result.equityCurve) {
+            equityInsert.clearBindings()
+            equityInsert.bind({
+              runId,
+              time: point.time,
+              value: point.value,
+            })
+            await equityInsert.run()
+          }
+        } finally {
+          equityInsert.destroySync()
         }
-        for (const trade of result.trades) {
-          await this.connection.run('insert into backtest_trades values ($runId, $time, $symbol, $side, $price, $quantity, $pnl)', {
-            runId,
-            time: trade.time,
-            symbol: trade.symbol,
-            side: trade.side,
-            price: trade.price,
-            quantity: trade.quantity,
-            pnl: trade.pnl,
-          })
+        const tradeInsert = await this.connection.prepare('insert into backtest_trades values ($runId, $time, $symbol, $side, $price, $quantity, $pnl)')
+        try {
+          for (const trade of result.trades) {
+            tradeInsert.clearBindings()
+            tradeInsert.bind({
+              runId,
+              time: trade.time,
+              symbol: trade.symbol,
+              side: trade.side,
+              price: trade.price,
+              quantity: trade.quantity,
+              pnl: trade.pnl,
+            })
+            await tradeInsert.run()
+          }
+        } finally {
+          tradeInsert.destroySync()
         }
         await this.connection.run('commit')
       } catch (error) {
@@ -132,17 +146,20 @@ export class AnalyticsStore {
     await this.enqueueWrite(async () => {
       await this.connection.run('begin transaction')
       try {
-        for (const candle of candles) {
-          await this.connection.run(
-            `insert into market_candles
-             values ($symbol, $interval, $time, $open, $high, $low, $close, $volume)
-             on conflict(symbol, interval, time_ms) do update set
-               open = excluded.open,
-               high = excluded.high,
-               low = excluded.low,
-               close = excluded.close,
-               volume = excluded.volume`,
-            {
+        const insert = await this.connection.prepare(
+          `insert into market_candles
+           values ($symbol, $interval, $time, $open, $high, $low, $close, $volume)
+           on conflict(symbol, interval, time_ms) do update set
+             open = excluded.open,
+             high = excluded.high,
+             low = excluded.low,
+             close = excluded.close,
+             volume = excluded.volume`,
+        )
+        try {
+          for (const candle of candles) {
+            insert.clearBindings()
+            insert.bind({
               symbol,
               interval,
               time: candle.time,
@@ -151,8 +168,11 @@ export class AnalyticsStore {
               low: candle.low,
               close: candle.close,
               volume: candle.volume,
-            },
-          )
+            })
+            await insert.run()
+          }
+        } finally {
+          insert.destroySync()
         }
         await this.connection.run('commit')
       } catch (error) {

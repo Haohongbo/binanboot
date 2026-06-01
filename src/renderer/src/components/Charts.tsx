@@ -75,6 +75,7 @@ export function MarketChart({
   const drawStartRef = useRef<DrawPoint | null>(null)
   const lastFitKeyRef = useRef<string | null>(null)
   const lastDataKeyRef = useRef<string | null>(null)
+  const lastIndicatorsVisibleRef = useRef(showIndicators)
   const lastCandleCountRef = useRef(0)
   const [overlayVersion, setOverlayVersion] = useState(0)
   const [drawnLines, setDrawnLines] = useState<DrawLine[]>([])
@@ -235,6 +236,7 @@ export function MarketChart({
       quoteLineRef.current = null
       lastFitKeyRef.current = null
       lastDataKeyRef.current = null
+      lastIndicatorsVisibleRef.current = showIndicators
       lastCandleCountRef.current = 0
     }
   }, [bumpOverlay, containerRef])
@@ -255,11 +257,27 @@ export function MarketChart({
       lastDataKeyRef.current = dataKey
       lastCandleCountRef.current = data.candles.length
     }
-    ma5Ref.current.setData(data.ma5)
-    ma20Ref.current.setData(data.ma20)
-    bollUpperRef.current?.setData(showIndicators ? data.boll.upper : [])
-    bollMiddleRef.current?.setData(showIndicators ? data.boll.middle : [])
-    bollLowerRef.current?.setData(showIndicators ? data.boll.lower : [])
+    if (canIncrementalUpdate && lastIndicatorsVisibleRef.current === showIndicators) {
+      const latestMa5 = data.ma5[data.ma5.length - 1]
+      const latestMa20 = data.ma20[data.ma20.length - 1]
+      const latestBollUpper = data.boll.upper[data.boll.upper.length - 1]
+      const latestBollMiddle = data.boll.middle[data.boll.middle.length - 1]
+      const latestBollLower = data.boll.lower[data.boll.lower.length - 1]
+      if (latestMa5) ma5Ref.current.update(latestMa5)
+      if (latestMa20) ma20Ref.current.update(latestMa20)
+      if (showIndicators) {
+        if (latestBollUpper) bollUpperRef.current?.update(latestBollUpper)
+        if (latestBollMiddle) bollMiddleRef.current?.update(latestBollMiddle)
+        if (latestBollLower) bollLowerRef.current?.update(latestBollLower)
+      }
+    } else {
+      ma5Ref.current.setData(data.ma5)
+      ma20Ref.current.setData(data.ma20)
+      bollUpperRef.current?.setData(showIndicators ? data.boll.upper : [])
+      bollMiddleRef.current?.setData(showIndicators ? data.boll.middle : [])
+      bollLowerRef.current?.setData(showIndicators ? data.boll.lower : [])
+      lastIndicatorsVisibleRef.current = showIndicators
+    }
     const fitKey = market ? `${market.symbol}:${market.interval}` : null
     if (fitKey && fitKey !== lastFitKeyRef.current) {
       requestAnimationFrame(() => {

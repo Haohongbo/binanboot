@@ -5,7 +5,9 @@ import type { ApiProfile } from '../../../shared/types'
 import { useQuantStore } from '../store'
 
 export function ApiPage(): ReactElement {
-  const { apiProfiles, upsertApiProfile, removeApiProfile } = useQuantStore()
+  const apiProfiles = useQuantStore((state) => state.apiProfiles)
+  const upsertApiProfile = useQuantStore((state) => state.upsertApiProfile)
+  const removeApiProfile = useQuantStore((state) => state.removeApiProfile)
   const [form, setForm] = useState({
     label: 'Binance 主账户',
     apiKey: '',

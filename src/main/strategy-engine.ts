@@ -11,6 +11,7 @@ import {
 import type { LocalStore } from './store'
 import type {
   Candle,
+  FuturesAccountSnapshot,
   OrderRecord,
   OrderSide,
   RiskEvent,
@@ -24,6 +25,7 @@ import {
 } from '../shared/strategy-positions'
 import {
   buildSignalContext,
+  compileScriptRules,
   evalScriptExpression,
   parseScriptRules,
   type ScriptRules,
@@ -185,6 +187,9 @@ export class StrategyExecutionEngine {
   private readonly lastPositionByStrategy = new Map<string, string>()
   private readonly transientConnectivityFailures = new Map<string, number>()
   private readonly notices = new Set<string>()
+  private readonly tickAccountByProfile = new Map<string, Promise<FuturesAccountSnapshot>>()
+  private readonly tickKlinesByMarket = new Map<string, Promise<Candle[]>>()
+  private readonly tickSyncedAccounts = new Set<string>()
 
   constructor(private readonly store: LocalStore) {}
 
@@ -207,11 +212,13 @@ export class StrategyExecutionEngine {
       const snapshot = this.store.snapshot()
       if (snapshot.preferences.liveMode !== 'live') return
 
+      this.resetTickCaches()
       const runningStrategies = snapshot.strategies.filter((strategy) => strategy.status === 'running')
       for (const strategy of runningStrategies) {
         await this.executeStrategy(strategy)
       }
     } finally {
+      this.resetTickCaches()
       this.running = false
     }
   }
@@ -244,9 +251,8 @@ export class StrategyExecutionEngine {
         return
       }
 
-      const account = await getFuturesAccount(credentials)
-      await this.store.updatePositions(account.positions)
-      const candles = await getKlines(strategy.symbol, strategy.interval, 140, profile.environment)
+      const account = await this.getTickAccount(profile.id, credentials)
+      const candles = await this.getTickKlines(strategy.symbol, strategy.interval, profile.environment)
       const index = latestClosedCandleIndex(candles, strategy.interval)
       if (index < 60) return
       const candle = candles[index]
@@ -295,13 +301,14 @@ export class StrategyExecutionEngine {
         closeShort: 'false',
         position: '0.1',
       })
-      const shouldLong = Boolean(evalScriptExpression(script.long, context))
-      const shouldCloseLong = Boolean(evalScriptExpression(script.closeLong, context))
-      const shouldShort = Boolean(evalScriptExpression(script.short, context))
-      const shouldCloseShort = Boolean(evalScriptExpression(script.closeShort, context))
+      const compiledScript = compileScriptRules(script)
+      const shouldLong = Boolean(compiledScript.long(context))
+      const shouldCloseLong = Boolean(compiledScript.closeLong(context))
+      const shouldShort = Boolean(compiledScript.short(context))
+      const shouldCloseShort = Boolean(compiledScript.closeShort(context))
       const leverage = normalizeLeverage(rules.maxLeverage)
       const positionRatio = Math.min(
-        Math.max(Number(evalScriptExpression(script.position, context)), 0),
+        Math.max(Number(compiledScript.position(context)), 0),
         strategy.maxPositionRatio / 100,
         rules.maxPositionRatio / 100,
       )
@@ -366,6 +373,51 @@ export class StrategyExecutionEngine {
     const credentials = this.store.getCredentials(profileId)
     if (!credentials) return undefined
     return { ...credentials, environment }
+  }
+
+  private resetTickCaches(): void {
+    this.tickAccountByProfile.clear()
+    this.tickKlinesByMarket.clear()
+    this.tickSyncedAccounts.clear()
+  }
+
+  private accountCacheKey(profileId: string, environment: Credentials['environment']): string {
+    return `${environment ?? 'live'}:${profileId}`
+  }
+
+  private invalidateTickAccount(profileId: string, environment: Credentials['environment']): void {
+    const key = this.accountCacheKey(profileId, environment)
+    this.tickAccountByProfile.delete(key)
+    this.tickSyncedAccounts.delete(key)
+  }
+
+  private async getTickAccount(profileId: string, credentials: Credentials): Promise<FuturesAccountSnapshot> {
+    const key = this.accountCacheKey(profileId, credentials.environment)
+    let request = this.tickAccountByProfile.get(key)
+    if (!request) {
+      request = getFuturesAccount(credentials)
+      this.tickAccountByProfile.set(key, request)
+    }
+    const account = await request
+    if (!this.tickSyncedAccounts.has(key)) {
+      await this.store.updatePositions(account.positions)
+      this.tickSyncedAccounts.add(key)
+    }
+    return account
+  }
+
+  private async getTickKlines(
+    symbol: string,
+    interval: StrategyConfig['interval'],
+    environment: Credentials['environment'],
+  ): Promise<Candle[]> {
+    const key = `${environment ?? 'live'}:${symbol}:${interval}`
+    let request = this.tickKlinesByMarket.get(key)
+    if (!request) {
+      request = getKlines(symbol, interval, 140, environment)
+      this.tickKlinesByMarket.set(key, request)
+    }
+    return request
   }
 
   private isTransientConnectivityError(message: string): boolean {
@@ -457,6 +509,7 @@ export class StrategyExecutionEngine {
       strategyId: strategy.id,
       idempotencyKey: key,
     })
+    this.invalidateTickAccount(apiProfileId, credentials.environment)
     await this.recordOrder(
       strategy,
       order,
@@ -494,6 +547,7 @@ export class StrategyExecutionEngine {
       strategyId: strategy.id,
       idempotencyKey: key,
     })
+    this.invalidateTickAccount(apiProfileId, credentials.environment)
     await this.recordOrder(strategy, order, `${positionSide} 平仓信号触发，已使用 reduceOnly 平仓。`)
   }
 
