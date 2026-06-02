@@ -302,7 +302,8 @@ async function runNaiveBacktest(
   const returns = equityCurve.slice(1).map((item, index) => (item.value - equityCurve[index].value) / equityCurve[index].value)
   const avg = returns.reduce((sum, item) => sum + item, 0) / Math.max(1, returns.length)
   const variance = returns.reduce((sum, item) => sum + Math.pow(item - avg, 2), 0) / Math.max(1, returns.length)
-  const sharpeRatio = variance > 0 ? (avg / Math.sqrt(variance)) * Math.sqrt(365) : 0
+  const periodsPerYear = (365 * 86_400_000) / intervalMs[params.interval]
+  const sharpeRatio = variance > 0 ? (avg / Math.sqrt(variance)) * Math.sqrt(periodsPerYear) : 0
 
   return {
     source,

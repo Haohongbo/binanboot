@@ -6,16 +6,36 @@ import { join } from 'node:path'
 const SYMBOL = 'SOLUSDT'
 const INTERVAL = '5m'
 const INTERVAL_MS = 300_000
-const LEVERAGE = Number(process.env.LEVERAGE ?? 1)
+const LEVERAGE = Number(process.env.LEVERAGE ?? 5)
 const FEE_RATE = 0.0004
 const INITIAL_CAPITAL = 10_000
-const POSITION_CAP = Number(process.env.POSITION_CAP ?? 0.8)
-const WINDOWS = [30, 60, 90, 180]
+const POSITION_CAP = Number(process.env.POSITION_CAP ?? 0.25)
+const WINDOWS = parseNumberList(process.env.WINDOWS, [30, 60, 90, 180, 365])
+const ROUNDS = Math.max(0, Math.floor(Number(process.env.ROUNDS ?? 20000)))
+const KLINE_SOURCE = process.env.KLINE_SOURCE ?? 'hybrid'
+const LOOKBACK_DAYS = Math.max(Math.max(...WINDOWS) + 10, Math.floor(Number(process.env.LOOKBACK_DAYS ?? 380)))
+const TARGET_MAX_DRAWDOWN = Number(process.env.TARGET_MAX_DRAWDOWN ?? 0.2)
+const TARGET_MIN_WIN = Number(process.env.TARGET_MIN_WIN ?? 0.7)
+const TARGET_MIN_TRADES = Number(process.env.TARGET_MIN_TRADES ?? 20)
+const REQUIRED_DIRECTION = process.env.REQUIRED_DIRECTION
 const CACHE_DIR = join(tmpdir(), 'binanboot-optimizer-klines')
+const FUTURES_REST_BASE = process.env.FUTURES_REST_BASE ?? 'https://fapi.binance.com'
+const SPOT_REST_BASE = process.env.SPOT_REST_BASE ?? 'https://data-api.binance.vision'
+const ALLOW_SPOT_KLINE_FALLBACK = process.env.ALLOW_SPOT_KLINE_FALLBACK !== '0'
+let usedSpotKlineFallback = false
 
 const now = new Date()
-const endTime = Number(process.env.END_TIME_MS ?? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-const startTime = endTime - 190 * 86_400_000
+const endTime = Number(process.env.END_TIME_MS ?? now.getTime())
+const startTime = endTime - LOOKBACK_DAYS * 86_400_000
+
+function parseNumberList(value, fallback) {
+  if (!value) return fallback
+  const parsed = value
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item) && item > 0)
+  return parsed.length > 0 ? parsed : fallback
+}
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -77,15 +97,31 @@ async function downloadBinary(url) {
     if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
     return Buffer.from(await response.arrayBuffer())
   } catch (error) {
+    return downloadWithCurl(url, { maxBuffer: 8 * 1024 * 1024, originalError: error })
+  }
+}
+
+function downloadWithCurl(url, { encoding, maxBuffer, originalError }) {
+  const baseArgs = ['-fsSL', '--retry', '3', '--retry-delay', '1', '--retry-all-errors', '--connect-timeout', '10', '--max-time', '60', url]
+  const stdio = ['ignore', 'pipe', 'ignore']
+  try {
+    return execFileSync('curl', baseArgs, { encoding, maxBuffer, stdio })
+  } catch {
     try {
-      return execFileSync(
-        'curl',
-        ['-fsSL', '--retry', '3', '--retry-delay', '1', '--retry-all-errors', '--connect-timeout', '10', '--max-time', '60', url],
-        { maxBuffer: 8 * 1024 * 1024 },
-      )
+      return execFileSync('curl', ['-k', ...baseArgs], { encoding, maxBuffer, stdio })
     } catch {
-      throw error
+      throw originalError
     }
+  }
+}
+
+async function downloadText(url) {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+    return await response.text()
+  } catch (error) {
+    return downloadWithCurl(url, { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, originalError: error })
   }
 }
 
@@ -112,7 +148,9 @@ async function fetchVisionDay(time) {
 
 async function fetchKlinesFromVision() {
   const candles = []
-  for (let cursor = Date.UTC(new Date(startTime).getUTCFullYear(), new Date(startTime).getUTCMonth(), new Date(startTime).getUTCDate()); cursor < endTime; cursor += 86_400_000) {
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  const visionEndTime = Math.min(endTime, todayUtc)
+  for (let cursor = Date.UTC(new Date(startTime).getUTCFullYear(), new Date(startTime).getUTCMonth(), new Date(startTime).getUTCDate()); cursor < visionEndTime; cursor += 86_400_000) {
     candles.push(...await fetchVisionDay(cursor))
   }
   const unique = new Map()
@@ -122,31 +160,38 @@ async function fetchKlinesFromVision() {
   return [...unique.values()].sort((left, right) => left.time - right.time)
 }
 
-async function fetchKlinesFromRest() {
+async function fetchKlinesFromRest(from = startTime, to = endTime) {
   const candles = []
-  let cursor = startTime
-  while (cursor <= endTime) {
+  let cursor = from
+  while (cursor <= to) {
     const query = new URLSearchParams({
       symbol: SYMBOL,
       interval: INTERVAL,
       startTime: String(cursor),
-      endTime: String(endTime),
+      endTime: String(to),
       limit: '1500',
     })
-    const response = await fetch(`https://fapi.binance.com/fapi/v1/klines?${query}`)
-    if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
-    const rows = await response.json()
+    let rows
+    try {
+      rows = JSON.parse(await downloadText(`${FUTURES_REST_BASE}/fapi/v1/klines?${query}`))
+    } catch (error) {
+      if (!ALLOW_SPOT_KLINE_FALLBACK) throw error
+      usedSpotKlineFallback = true
+      rows = JSON.parse(await downloadText(`${SPOT_REST_BASE}/api/v3/klines?${query}`))
+    }
     if (rows.length === 0) break
-    const batch = rows.map((row) => ({
-      time: Number(row[0]),
-      open: Number(row[1]),
-      high: Number(row[2]),
-      low: Number(row[3]),
-      close: Number(row[4]),
-      volume: Number(row[5]),
-    }))
+    const batch = rows
+      .filter((row) => Number(row[6]) <= to)
+      .map((row) => ({
+        time: Number(row[0]),
+        open: Number(row[1]),
+        high: Number(row[2]),
+        low: Number(row[3]),
+        close: Number(row[4]),
+        volume: Number(row[5]),
+      }))
     candles.push(...batch)
-    const lastTime = batch.at(-1)?.time
+    const lastTime = Number(rows.at(-1)?.[0])
     if (!lastTime) break
     cursor = lastTime + INTERVAL_MS
     if (batch.length < 1500) break
@@ -154,15 +199,25 @@ async function fetchKlinesFromRest() {
   }
   const unique = new Map()
   candles
-    .filter((candle) => candle.time >= startTime && candle.time <= endTime)
+    .filter((candle) => candle.time >= from && candle.time <= to)
     .forEach((candle) => unique.set(candle.time, candle))
   return [...unique.values()].sort((left, right) => left.time - right.time)
 }
 
 async function fetchKlines() {
-  if (process.env.KLINE_SOURCE === 'rest') return fetchKlinesFromRest()
+  if (KLINE_SOURCE === 'rest') return fetchKlinesFromRest()
   const candles = await fetchKlinesFromVision()
-  if (candles.length > 0) return candles
+  if (KLINE_SOURCE === 'vision') return candles
+  if (candles.length > 0) {
+    const lastTime = candles.at(-1)?.time ?? startTime
+    if (lastTime + INTERVAL_MS < endTime) {
+      const tail = await fetchKlinesFromRest(lastTime + INTERVAL_MS, endTime)
+      const unique = new Map()
+      for (const candle of [...candles, ...tail]) unique.set(candle.time, candle)
+      return [...unique.values()].sort((left, right) => left.time - right.time)
+    }
+    return candles
+  }
   return fetchKlinesFromRest()
 }
 
@@ -504,23 +559,27 @@ function evaluate(candles, s, h, candidate) {
   const avgReturn = average(metrics.map((item) => item.ret))
   const avgWin = average(metrics.map((item) => item.win))
   const avgTrades = average(metrics.map((item) => item.closed))
+  const riskAdjustedReturn = weightedReturn / Math.max(0.04, maxDrawdown)
   const score =
-    weightedReturn * 4.2 +
-    avgReturn * 1.4 +
-    minReturn * 2 +
-    minWin * 4 +
-    avgWin * 2 +
+    weightedReturn * 2.8 +
+    avgReturn * 1.8 +
+    minReturn * 3.5 +
+    riskAdjustedReturn * 0.28 +
+    minWin * 9 +
+    avgWin * 4 +
     Math.min(minPf, 3) * 0.6 +
     Math.min(avgPf, 3) * 0.25 +
     Math.log1p(Math.max(0, minTrades)) * 0.45 +
     Math.log1p(avgTrades) * 0.18 -
-    maxDrawdown * 7 -
-    (maxDrawdown > 0.1 ? (maxDrawdown - 0.1) * 16 : 0) -
-    (maxDrawdown > 0.13 ? (maxDrawdown - 0.13) * 28 : 0) -
-    (minTrades < 12 ? (12 - minTrades) * 1.2 : 0) -
-    (minWin < 0.58 ? (0.58 - minWin) * 18 : 0) -
-    (avgWin < 0.62 ? (0.62 - avgWin) * 10 : 0) -
-    (minReturn < 0.02 ? (0.02 - minReturn) * 10 : 0)
+    maxDrawdown * 12 -
+    (maxDrawdown > TARGET_MAX_DRAWDOWN ? (maxDrawdown - TARGET_MAX_DRAWDOWN) * 70 : 0) -
+    (maxDrawdown > TARGET_MAX_DRAWDOWN * 1.25 ? (maxDrawdown - TARGET_MAX_DRAWDOWN * 1.25) * 120 : 0) -
+    (maxDrawdown > TARGET_MAX_DRAWDOWN * 1.5 ? (maxDrawdown - TARGET_MAX_DRAWDOWN * 1.5) * 180 : 0) -
+    (minTrades < TARGET_MIN_TRADES ? (TARGET_MIN_TRADES - minTrades) * 1.4 : 0) -
+    (minWin < TARGET_MIN_WIN ? (TARGET_MIN_WIN - minWin) * 34 : 0) -
+    (avgWin < TARGET_MIN_WIN + 0.04 ? (TARGET_MIN_WIN + 0.04 - avgWin) * 18 : 0) -
+    (minReturn < 0.02 ? (0.02 - minReturn) * 12 : 0) -
+    (minReturn < 0 ? Math.abs(minReturn) * 36 : 0)
   return { score, metrics, minReturn, minWin, minTrades, maxDrawdown, minPf, avgPf }
 }
 
@@ -540,6 +599,12 @@ function candidateFrom(base, ranges, mutationRate = 0.55) {
     if (random() < mutationRate) candidate[key] = pick(values)
   }
   return candidate
+}
+
+function parseExtraCandidates() {
+  if (!process.env.EXTRA_CANDIDATE_JSON) return []
+  const parsed = JSON.parse(process.env.EXTRA_CANDIDATE_JSON)
+  return Array.isArray(parsed) ? parsed : [parsed]
 }
 
 const baseCandidate = {
@@ -590,6 +655,51 @@ const baseCandidate = {
 const currentScriptCandidate = {
   direction: 'long-short',
   longMa120: 0.985,
+  longTrend: 1,
+  longHtf: -99,
+  longHtfMomentum20: 0,
+  longMom5: 0.008,
+  longMom20: 0,
+  longRsiLo: 30,
+  longRsiHi: 58,
+  longVolume: 0.1,
+  longBbLo: -0.6,
+  longBbHi: 1.05,
+  longLocation: 0.2,
+  longFactor: -1,
+  longAtr: 0.022,
+  longTp: 0.016,
+  longSl: 0.05,
+  longDd: 0.05,
+  longBars: 288,
+  longTrail: 0.006,
+  longHtfExit: -99,
+  shortMa120: 1.02,
+  shortTrend: 99,
+  shortHtf: -0.5,
+  shortHtfMomentum20: -0.012,
+  shortMom5: 0.008,
+  shortMom20: -0.002,
+  shortRsiLo: 5,
+  shortRsiHi: 64,
+  shortVolume: 0.6,
+  shortBbLo: -0.5,
+  shortBbHi: 1.2,
+  shortLocation: 0.5,
+  shortFactor: -0.5,
+  shortAtr: 0.026,
+  shortTp: 0.012,
+  shortSl: 0.045,
+  shortDd: 0.05,
+  shortBars: 144,
+  shortTrail: 0.006,
+  shortHtfExit: 99,
+  position: 0.18,
+}
+
+const maxReturnScriptCandidate = {
+  direction: 'long-short',
+  longMa120: 1,
   longTrend: 0.997,
   longHtf: 0,
   longHtfMomentum20: -0.006,
@@ -601,34 +711,34 @@ const currentScriptCandidate = {
   longBbLo: -1,
   longBbHi: 1.2,
   longLocation: 0.5,
-  longFactor: -1,
-  longAtr: 0.026,
+  longFactor: 0,
+  longAtr: 0.03,
   longTp: 0.04,
   longSl: 0.02,
   longDd: 0.05,
   longBars: 288,
   longTrail: 0.02,
   longHtfExit: -99,
-  shortMa120: 0.94,
-  shortTrend: 99,
+  shortMa120: 0.98,
+  shortTrend: 1.004,
   shortHtf: 99,
   shortHtfMomentum20: 0,
-  shortMom5: -0.006,
-  shortMom20: -0.012,
-  shortRsiLo: 18,
-  shortRsiHi: 52,
+  shortMom5: -0.01,
+  shortMom20: 0.002,
+  shortRsiLo: 28,
+  shortRsiHi: 68,
   shortVolume: 0.1,
   shortBbLo: -0.5,
   shortBbHi: 1.7,
   shortLocation: 0.8,
-  shortFactor: 1.5,
-  shortAtr: 0.022,
+  shortFactor: 0,
+  shortAtr: 0.018,
   shortTp: 0.03,
-  shortSl: 0.035,
+  shortSl: 0.025,
   shortDd: 0.025,
   shortBars: 48,
   shortTrail: 0.003,
-  shortHtfExit: 0.2,
+  shortHtfExit: 0,
   position: 0.8,
 }
 
@@ -702,7 +812,7 @@ function scriptFromCandidate(candidate) {
 const candles = await fetchKlines()
 const series = buildSeries(candles)
 const htfSeries = buildHtfSeries(candles)
-console.log(`candles=${candles.length} from=${new Date(candles[0].time).toISOString()} to=${new Date(candles.at(-1).time).toISOString()}`)
+console.log(`candles=${candles.length} from=${new Date(candles[0].time).toISOString()} to=${new Date(candles.at(-1).time).toISOString()} leverage=${LEVERAGE}x positionCap=${POSITION_CAP} source=${KLINE_SOURCE}${usedSpotKlineFallback ? '+spot-tail-fallback' : ''}`)
 
 const currentResult = evaluate(candles, series, htfSeries, currentScriptCandidate)
 console.log('CURRENT_SCRIPT', JSON.stringify({
@@ -722,18 +832,39 @@ console.log('CURRENT_SCRIPT', JSON.stringify({
 }, null, 2))
 
 let best = []
+let bestConstrained = []
+
+function meetsTargets(result) {
+  return (
+    result.minReturn > 0 &&
+    result.minWin >= TARGET_MIN_WIN &&
+    result.minTrades >= TARGET_MIN_TRADES &&
+    result.maxDrawdown <= TARGET_MAX_DRAWDOWN
+  )
+}
+
 function addResult(candidate) {
+  if (REQUIRED_DIRECTION) candidate = { ...candidate, direction: REQUIRED_DIRECTION }
   const result = evaluate(candles, series, htfSeries, candidate)
   best.push({ candidate, ...result })
   best.sort((left, right) => right.score - left.score)
   best = best.slice(0, 20)
+  if (meetsTargets(result)) {
+    bestConstrained.push({ candidate, ...result })
+    bestConstrained.sort((left, right) => right.score - left.score)
+    bestConstrained = bestConstrained.slice(0, 20)
+  }
 }
 
 addResult(baseCandidate)
 addResult(currentScriptCandidate)
+addResult(maxReturnScriptCandidate)
 addResult({ ...baseCandidate, direction: 'long-only' })
 addResult({ ...baseCandidate, direction: 'short-only' })
-for (let round = 0; round < 16000; round += 1) {
+for (const candidate of parseExtraCandidates()) {
+  addResult({ ...baseCandidate, ...candidate })
+}
+for (let round = 0; round < ROUNDS; round += 1) {
   const anchor = best[Math.floor(random() * Math.min(best.length, 5))]?.candidate ?? baseCandidate
   addResult(candidateFrom(anchor, ranges, round < 2000 ? 0.8 : 0.45))
 }
@@ -759,3 +890,7 @@ for (const [index, item] of best.slice(0, 8).entries()) {
 
 console.log('BEST_SCRIPT')
 console.log(scriptFromCandidate(best[0].candidate))
+if (bestConstrained[0]) {
+  console.log('BEST_CONSTRAINED_SCRIPT')
+  console.log(scriptFromCandidate(bestConstrained[0].candidate))
+}

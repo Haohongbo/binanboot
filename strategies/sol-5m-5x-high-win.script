@@ -1,0 +1,5 @@
+LONG: close > ma120 * 0.985 && ma20 > ma60 && htfMomentum20 > 0 && momentum5 > 0.008 && momentum20 > 0 && rsi14 > 30 && rsi14 < 58 && volumeRatio > 0.1 && bbPctB > -0.6 && bbPctB < 1.05 && closeLocation > 0.2 && factorScore > -1 && atrPct < 0.022
+CLOSE_LONG: unrealizedPnlPct > 0.016 || unrealizedPnlPct < -0.05 || drawdownSinceEntry > 0.05 || barsHeld > 288 || ((close < ma20 || maFast < maSlow || macd < macdSignal) && unrealizedPnlPct > 0.006)
+SHORT: close < ma120 * 1.02 && htfTrendScore < -0.5 && htfMomentum20 < -0.012 && momentum5 < 0.008 && momentum20 < -0.002 && rsi14 > 5 && rsi14 < 64 && volumeRatio > 0.6 && bbPctB > -0.5 && bbPctB < 1.2 && closeLocation < 0.5 && factorScore < -0.5 && atrPct < 0.026
+CLOSE_SHORT: unrealizedPnlPct > 0.012 || unrealizedPnlPct < -0.045 || drawdownSinceEntry > 0.05 || barsHeld > 144 || ((close > ma20 || maFast > maSlow || macd > macdSignal) && unrealizedPnlPct > 0.006)
+POSITION: 0.18

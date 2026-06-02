@@ -127,11 +127,29 @@ SHORT: close < ma120 * 0.94 && htfMomentum20 < 0 && momentum5 < -0.006 && moment
 CLOSE_SHORT: unrealizedPnlPct > 0.03 || unrealizedPnlPct < -0.035 || drawdownSinceEntry > 0.025 || barsHeld > 48 || htfTrendScore > 0.2 || ((close > ma20 || maFast > maSlow || macd > macdSignal) && unrealizedPnlPct > 0.003)
 POSITION: 1`
 
-const sol5mLongShortPulseScript = `LONG: close > ma120 && ma20 > ma60 * 0.997 && htfTrendScore > 0 && htfMomentum20 > -0.006 && momentum5 > 0.008 && momentum20 > 0 && rsi14 > 5 && rsi14 < 66 && volumeRatio > 0.05 && bbPctB > -1 && bbPctB < 1.2 && closeLocation > 0.5 && factorScore > 0 && atrPct < 0.03
+const previousSol5mOneYearHighReturnScript = `LONG: close > ma120 && ma20 > ma60 * 0.997 && htfTrendScore > 0 && htfMomentum20 > -0.006 && momentum5 > 0.008 && momentum20 > 0 && rsi14 > 5 && rsi14 < 66 && volumeRatio > 0.05 && bbPctB > -1 && bbPctB < 1.2 && closeLocation > 0.5 && factorScore > 0 && atrPct < 0.03
 CLOSE_LONG: unrealizedPnlPct > 0.04 || unrealizedPnlPct < -0.02 || drawdownSinceEntry > 0.05 || barsHeld > 288 || ((close < ma20 || maFast < maSlow || macd < macdSignal) && unrealizedPnlPct > 0.02)
 SHORT: close < ma120 * 0.98 && ma20 < ma60 * 1.004 && htfMomentum20 < 0 && momentum5 < -0.01 && momentum20 < 0.002 && rsi14 > 28 && rsi14 < 68 && volumeRatio > 0.1 && bbPctB > -0.5 && bbPctB < 1.7 && closeLocation < 0.8 && factorScore < 0 && atrPct < 0.018
 CLOSE_SHORT: unrealizedPnlPct > 0.03 || unrealizedPnlPct < -0.025 || drawdownSinceEntry > 0.025 || barsHeld > 48 || htfTrendScore > 0 || ((close > ma20 || maFast > maSlow || macd > macdSignal) && unrealizedPnlPct > 0.003)
 POSITION: 0.8`
+
+const previousSol5m5xLongOnlyScript = `LONG: close > ma120 * 0.975 && ma20 > ma60 * 0.997 && htfTrendScore > -0.15 && htfMomentum20 > -0.006 && momentum5 > 0.008 && momentum20 > 0 && rsi14 > 35 && rsi14 < 66 && volumeRatio > 0.5 && bbPctB > 0 && bbPctB < 1.2 && closeLocation > 0.5 && factorScore > -0.5 && atrPct < 0.03
+CLOSE_LONG: unrealizedPnlPct > 0.04 || unrealizedPnlPct < -0.02 || drawdownSinceEntry > 0.035 || barsHeld > 768 || ((close < ma20 || maFast < maSlow || macd < macdSignal) && unrealizedPnlPct > 0.02)
+SHORT: false
+CLOSE_SHORT: false
+POSITION: 0.35`
+
+const previousSol5m5xShortWindowLongShortScript = `LONG: close > ma120 * 0.995 && ma20 > ma60 * 0.994 && htfTrendScore > -0.15 && htfMomentum20 > -0.006 && momentum5 > 0.008 && momentum20 > 0 && rsi14 > 40 && rsi14 < 66 && volumeRatio > 0.2 && bbPctB > -1 && bbPctB < 1.2 && closeLocation > 0.5 && factorScore > -0.5 && atrPct < 0.018
+CLOSE_LONG: unrealizedPnlPct > 0.04 || unrealizedPnlPct < -0.02 || drawdownSinceEntry > 0.05 || barsHeld > 768 || ((close < ma20 || maFast < maSlow || macd < macdSignal) && unrealizedPnlPct > 0.02)
+SHORT: close < ma120 * 0.98 && ma20 < ma60 * 0.994 && htfTrendScore < 0.25 && htfMomentum20 < 0 && momentum5 < -0.01 && momentum20 < 0.002 && rsi14 > 28 && rsi14 < 68 && volumeRatio > 0.1 && bbPctB > -0.5 && bbPctB < 1.2 && closeLocation < 0.8 && factorScore < 0 && atrPct < 0.018
+CLOSE_SHORT: unrealizedPnlPct > 0.03 || unrealizedPnlPct < -0.035 || drawdownSinceEntry > 0.025 || barsHeld > 48 || htfTrendScore > -0.25 || ((close > ma20 || maFast > maSlow || macd > macdSignal) && unrealizedPnlPct > 0.003)
+POSITION: 0.35`
+
+const sol5mLongShortPulseScript = `LONG: close > ma120 * 0.985 && ma20 > ma60 && htfMomentum20 > 0 && momentum5 > 0.008 && momentum20 > 0 && rsi14 > 30 && rsi14 < 58 && volumeRatio > 0.1 && bbPctB > -0.6 && bbPctB < 1.05 && closeLocation > 0.2 && factorScore > -1 && atrPct < 0.022
+CLOSE_LONG: unrealizedPnlPct > 0.016 || unrealizedPnlPct < -0.05 || drawdownSinceEntry > 0.05 || barsHeld > 288 || ((close < ma20 || maFast < maSlow || macd < macdSignal) && unrealizedPnlPct > 0.006)
+SHORT: close < ma120 * 1.02 && htfTrendScore < -0.5 && htfMomentum20 < -0.012 && momentum5 < 0.008 && momentum20 < -0.002 && rsi14 > 5 && rsi14 < 64 && volumeRatio > 0.6 && bbPctB > -0.5 && bbPctB < 1.2 && closeLocation < 0.5 && factorScore < -0.5 && atrPct < 0.026
+CLOSE_SHORT: unrealizedPnlPct > 0.012 || unrealizedPnlPct < -0.045 || drawdownSinceEntry > 0.05 || barsHeld > 144 || ((close > ma20 || maFast > maSlow || macd > macdSignal) && unrealizedPnlPct > 0.006)
+POSITION: 0.18`
 
 const defaultPreferences: AppPreferences = {
   selectedSymbol: 'BTCUSDT',
@@ -210,13 +228,13 @@ const defaultStrategies: StrategyConfig[] = [
   },
   {
     id: 'script-sol-5m-long-short-pulse',
-    name: 'SOL 5m 多空脉冲脚本',
+    name: 'SOL 5m 5x 年化风控多空脚本',
     type: 'script',
     symbol: 'SOLUSDT',
     orderAmount: 100,
-    maxPositionRatio: 35,
-    takeProfitRatio: 2,
-    stopLossRatio: 6,
+    maxPositionRatio: 18,
+    takeProfitRatio: 1.6,
+    stopLossRatio: 4.5,
     interval: '5m',
     slippageLimit: 0.2,
     status: 'stopped',
@@ -335,6 +353,9 @@ function normalizeStrategies(strategies?: StrategyConfig[]): StrategyConfig[] {
     legacySol5mMomentumPulseScript,
     legacySol5mThirtyDayTrendScript,
     previousSol5mLongShortPulseScript,
+    previousSol5mOneYearHighReturnScript,
+    previousSol5m5xLongOnlyScript,
+    previousSol5m5xShortWindowLongShortScript,
   ])
   return [
     ...items.map((strategy) => {
@@ -343,7 +364,17 @@ function normalizeStrategies(strategies?: StrategyConfig[]): StrategyConfig[] {
         strategy.id === 'script-sol-5m-long-short-pulse'
           ? !strategy.customScript || upgradeableSol5mScripts.has(strategy.customScript)
           : isSol5mScript && strategy.customScript !== undefined && upgradeableSol5mScripts.has(strategy.customScript)
-      return shouldUpgrade ? { ...strategy, customScript: sol5mLongShortPulseScript } : strategy
+      if (!shouldUpgrade) return strategy
+      return strategy.id === 'script-sol-5m-long-short-pulse'
+        ? {
+            ...strategy,
+            name: 'SOL 5m 5x 年化风控多空脚本',
+            takeProfitRatio: 1.6,
+            stopLossRatio: 4.5,
+            maxPositionRatio: 18,
+            customScript: sol5mLongShortPulseScript,
+          }
+        : { ...strategy, customScript: sol5mLongShortPulseScript }
     }),
     ...requiredStrategies.filter((strategy) => !items.some((item) => item.id === strategy.id)),
   ]
