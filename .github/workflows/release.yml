@@ -62,11 +62,9 @@ jobs:
         run: npx electron-builder ${{ matrix.target }} --publish always
 
   build-linux-centos8:
-    name: Build Linux CentOS 8 x64
+    name: Build Linux x64 packages
     if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'linux'
     runs-on: ubuntu-22.04
-    container:
-      image: rockylinux:8
     timeout-minutes: 60
 
     env:
@@ -78,8 +76,8 @@ jobs:
     steps:
       - name: Install system packages
         run: |
-          dnf install -y git rpm-build tar gzip xz unzip which python3 make gcc gcc-c++
-          dnf clean all
+          sudo apt-get update
+          sudo apt-get install -y rpm
 
       - name: Checkout
         uses: actions/checkout@v4
