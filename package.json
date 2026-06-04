@@ -14,8 +14,10 @@
     "dist": "npm run typecheck && npm run build && electron-builder",
     "dist:win": "npm run typecheck && npm run build && electron-builder --win",
     "dist:mac": "npm run typecheck && npm run build && electron-builder --mac",
+    "dist:linux": "npm run typecheck && npm run build && electron-builder --linux AppImage rpm --x64",
     "publish:win": "npm run typecheck && npm run build && electron-builder --win --publish always",
-    "publish:mac": "npm run typecheck && npm run build && electron-builder --mac --publish always"
+    "publish:mac": "npm run typecheck && npm run build && electron-builder --mac --publish always",
+    "publish:linux": "npm run typecheck && npm run build && electron-builder --linux AppImage rpm --x64 --publish always"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.2-r.1",

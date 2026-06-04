@@ -8,6 +8,8 @@ files:
 asar: true
 asarUnpack:
   - node_modules/@duckdb/node-api/**
+  - node_modules/@duckdb/node-bindings/**
+  - node_modules/@duckdb/node-bindings-*/**
 
 publish:
   provider: github
@@ -37,6 +39,19 @@ mac:
         - x64
         - arm64
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
+
+linux:
+  category: Finance
+  executableName: binanboot
+  maintainer: Binanboot Maintainers <noreply@binanboot.local>
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: rpm
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
 
 nsis:
   oneClick: false
