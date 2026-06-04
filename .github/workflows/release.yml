@@ -2,6 +2,15 @@ name: Build release
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Build target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - linux
   push:
     tags:
       - 'v*'
@@ -12,6 +21,7 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.name }}
+    if: github.event_name != 'workflow_dispatch' || inputs.target == 'all'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -53,6 +63,7 @@ jobs:
 
   build-linux-centos8:
     name: Build Linux CentOS 8 x64
+    if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'linux'
     runs-on: ubuntu-22.04
     container:
       image: rockylinux:8

@@ -53,6 +53,9 @@ linux:
         - x64
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
 
+rpm:
+  compression: gz
+
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
