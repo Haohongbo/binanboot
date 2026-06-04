@@ -54,7 +54,7 @@ linux:
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
 
 rpm:
-  compression: gz
+  compression: gzip
 
 nsis:
   oneClick: false
